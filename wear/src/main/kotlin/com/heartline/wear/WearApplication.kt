@@ -4,6 +4,11 @@
 package com.heartline.wear
 
 import com.heartline.datalayer.diag.HLog
+import com.heartline.datalayer.ForegroundOpener
+import com.heartline.shared.sync.WatchLinkChecker
+import com.heartline.wear.sync.WatchLinkReceiver
+import io.github.sype0.w7link.common.LinkHub
+import io.github.sype0.w7link.wear.LinkService
 import android.app.Application
 import com.heartline.wear.di.wearModule
 import com.heartline.wear.di.APP_SCOPE
@@ -38,6 +43,16 @@ class WearApplication : Application() {
             "watch app ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}, fakeSensors=${BuildConfig.USE_FAKE_SENSORS}) " +
                 "on ${android.os.Build.MODEL}, API ${android.os.Build.VERSION.SDK_INT}",
         )
+        // Sync with the phone runs over the companion link instead of the Wearable Data Layer.
+        val linkScope = get<CoroutineScope>(APP_SCOPE)
+        LinkHub.receiver = WatchLinkReceiver(get(), get(), linkScope)
+        ForegroundOpener(this)
+        // Each time the link comes up: push the outbox, then fetch status, settings, calibration and profile.
+        LinkHub.onConnect {
+            SyncWorker.enqueue(this)
+            linkScope.launch { runCatching { get<WatchLinkChecker>().check() } }
+        }
+        LinkService.start(this)
         // Deliver anything left over from a previous session.
         SyncWorker.enqueue(this)
         val settings = get<WatchSettingsStore>().settings.value

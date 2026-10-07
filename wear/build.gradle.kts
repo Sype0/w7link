@@ -15,8 +15,10 @@ android {
 
     defaultConfig {
         // Same applicationId as :phone — required by the Wearable Data Layer.
-        applicationId = "io.github.selin2005.heartline"
-        minSdk = 30
+        // An unofficial fork must not reuse Heartline's application ID (see README).
+        applicationId = "io.github.sype0.w7link.wear"
+        // The companion link needs the Android 12 Bluetooth permissions.
+        minSdk = 31
         targetSdk = 37
         // Set by the Build workflow: -Pheartline.versionName=1.2.0 -Pheartline.versionCode=<minutes since 2026>.
         versionCode = (findProperty("heartline.versionCode") ?: "1").toString().toInt()

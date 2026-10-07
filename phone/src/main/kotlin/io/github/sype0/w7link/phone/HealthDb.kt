@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Sype0
+
 package io.github.sype0.w7link.phone
 
 import android.content.ContentValues
@@ -9,7 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Heart rate and step samples pulled from the watch. Stays on the phone. */
+/** Step counts pulled from the watch. Stays on the phone. Heart data lives in Heartline's own database. */
 class HealthDb(context: Context) : SQLiteOpenHelper(context, "health.db", null, 1) {
     class Sample(val ts: Long, val hr: Int, val steps: Int)
 
@@ -44,11 +47,10 @@ class HealthDb(context: Context) : SQLiteOpenHelper(context, "health.db", null, 
 
     fun exportCsv(out: Writer) {
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        out.write("time,heart_rate_bpm,steps_today\n")
+        out.write("time,steps_today\n")
         readableDatabase.rawQuery("SELECT ts, hr, steps FROM samples ORDER BY ts", null).use {
             while (it.moveToNext()) {
-                val hr = it.getInt(1)
-                out.write("${fmt.format(Date(it.getLong(0)))},${if (hr > 0) hr.toString() else ""},${it.getInt(2)}\n")
+                out.write("${fmt.format(Date(it.getLong(0)))},${it.getInt(2)}\n")
             }
         }
     }

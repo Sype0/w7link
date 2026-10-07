@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Sype0
+
 package io.github.sype0.w7link.common
 
 import android.content.SharedPreferences
@@ -35,6 +38,11 @@ object Proto {
     /** Manufacturer data under this (unassigned) id carries the L2CAP PSM, big endian. */
     const val MANUFACTURER_ID = 0xFFFF
 
+    /** Frame kinds. JSON carries the companion's own messages; the other two carry Heartline's sync. */
+    const val KIND_JSON = 0
+    const val KIND_ENVELOPE = 1
+    const val KIND_STREAM = 2
+
     fun msg(type: String, vararg fields: Pair<String, Any?>): JSONObject {
         val o = JSONObject().put("t", type)
         for ((k, v) in fields) o.put(k, v)
@@ -66,8 +74,8 @@ object Keys {
 }
 
 /**
- * Encrypted, authenticated JSON messages over a plain stream (an unencrypted
- * BLE L2CAP channel). Both sides hold a static P-256 key; the session keys come
+ * Encrypted, authenticated frames over a plain stream (an unencrypted BLE L2CAP
+ * channel). A frame is a kind byte ([Proto.KIND_JSON] and friends) and a body. Both sides hold a static P-256 key; the session keys come
  * from ECDH plus fresh nonces. The initiator commits to its key and nonce before
  * seeing the responder's, so [code] cannot be ground to a match by someone in
  * the middle; comparing it on both screens authenticates the first pairing.
@@ -135,19 +143,24 @@ class SecureChannel(
         }
     }
 
-    fun send(message: JSONObject) {
+    fun send(message: JSONObject) = sendFrame(Proto.KIND_JSON, message.toString().toByteArray())
+
+    fun sendFrame(kind: Int, body: ByteArray) {
         synchronized(output) {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, txKey, GCMParameterSpec(128, nonce(txCounter++)))
-            writeFrame(cipher.doFinal(message.toString().toByteArray()))
+            writeFrame(cipher.doFinal(byteArrayOf(kind.toByte()) + body))
         }
     }
 
-    fun receive(): JSONObject {
+    /** The next frame's kind and body. Only one thread may read. */
+    fun receiveFrame(): Pair<Int, ByteArray> {
         val frame = readFrame(MAX_FRAME)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, rxKey, GCMParameterSpec(128, nonce(rxCounter++)))
-        return JSONObject(String(cipher.doFinal(frame)))
+        val plain = cipher.doFinal(frame)
+        if (plain.isEmpty()) throw IOException("empty frame")
+        return (plain[0].toInt() and 0xff) to plain.copyOfRange(1, plain.size)
     }
 
     override fun close() {

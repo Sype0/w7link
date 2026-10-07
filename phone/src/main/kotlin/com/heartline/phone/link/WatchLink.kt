@@ -4,7 +4,7 @@
 package com.heartline.phone.link
 
 import com.heartline.datalayer.diag.HLog
-import com.heartline.datalayer.DataLayerTransport
+import io.github.sype0.w7link.common.LinkTransport
 import com.heartline.datalayer.DeepLinks
 import com.heartline.datalayer.RemoteOpener
 import com.heartline.phone.BuildConfig
@@ -78,7 +78,7 @@ enum class OpenResult { OPENED, NOTIFIED, NO_WATCH }
  * Opens a watch screen immediately via a remote activity launch. When that fails it falls back to
  * the /open message, which the watch shows as a notification that deep-links to the same screen.
  */
-class WatchOpener(private val opener: RemoteOpener, private val transport: DataLayerTransport, private val sync: () -> PhoneSyncEngine) {
+class WatchOpener(private val opener: RemoteOpener, private val transport: LinkTransport, private val sync: () -> PhoneSyncEngine) {
     suspend fun open(route: String): OpenResult = when {
         opener.open(DeepLinks.watch(route)) -> OpenResult.OPENED
         sync().openOnWatch(route) -> OpenResult.NOTIFIED
@@ -87,7 +87,7 @@ class WatchOpener(private val opener: RemoteOpener, private val transport: DataL
 
     suspend fun probe(): WatchLinkUi {
         val probe = transport.probe()
-        val name = if (probe == PeerProbe.REACHABLE) transport.peers().firstOrNull()?.displayName else null
+        val name = if (probe == PeerProbe.REACHABLE) transport.peerName() else null
         return WatchLinkUi(probe, name)
     }
 }

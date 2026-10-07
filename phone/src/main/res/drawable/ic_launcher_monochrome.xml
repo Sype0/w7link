@@ -1,27 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed-icon layer (Android 13+): the heart outline with its pulse, one colour. -->
+<!-- W7Link mark: a watch face, drawn on a 24 unit grid and scaled into the 66 dp safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:pivotX="54"
-        android:pivotY="54.5"
-        android:scaleX="0.86"
-        android:scaleY="0.86">
+        android:scaleX="2.2"
+        android:scaleY="2.2"
+        android:translateX="27.6"
+        android:translateY="27.6">
         <path
-            android:fillColor="#00000000"
-            android:pathData="M54,76.5 C52.6,75.6 30,61.8 30,45.6 C30,38.2 35.6,32.5 42.8,32.5 C47.6,32.5 51.8,35.2 54,39.2 C56.2,35.2 60.4,32.5 65.2,32.5 C72.4,32.5 78,38.2 78,45.6 C78,61.8 55.4,75.6 54,76.5 Z"
-            android:strokeWidth="3.6"
-            android:strokeColor="#FF000000"
-            android:strokeLineJoin="round" />
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M37,54 L43.5,54 L47,48 L51.5,61 L56.5,43 L61,57.5 L63.5,54 L71,54"
-            android:strokeWidth="3.4"
-            android:strokeColor="#FF000000"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round" />
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M9,2h6l0.8,4.1a7,7 0,0 1,0 11.8L15,22H9l-0.8,-4.1a7,7 0,0 1,0 -11.8L9,2zM12,7a5,5 0,1 0,0 10a5,5 0,0 0,0 -10zM11,9h2v3.6l2.3,1.4l-1,1.7L11,13.7V9z" />
     </group>
 </vector>

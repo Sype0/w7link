@@ -5,15 +5,18 @@ package com.heartline.shared
 
 /** Values that must match on the watch and the phone. */
 object AppInfo {
-    const val NAME = "Heartline"
+    const val NAME = "W7Link"
     const val PROTOCOL_VERSION = 1
 
-    const val REPO_OWNER = "selin2005"
-    const val REPO_NAME = "heartline"
+    /** This fork's repository; the project it is based on is [UPSTREAM_URL]. */
+    const val REPO_OWNER = "Sype0"
+    const val REPO_NAME = "w7link"
+    const val UPSTREAM_URL = "https://github.com/selin2005/heartline"
     const val REPO_URL = "https://github.com/$REPO_OWNER/$REPO_NAME"
     const val RELEASES_URL = "$REPO_URL/releases"
     const val ISSUES_URL = "$REPO_URL/issues"
-    const val COMMUNITY_URL = "https://t.me/HeartlineCommunity"
+    /** The fork has no community of its own, and Heartline's doesn't support it: questions go to the issues. */
+    const val COMMUNITY_URL = ISSUES_URL
     const val LICENSE_NAME = "GNU AGPL-3.0-or-later"
 
     /**

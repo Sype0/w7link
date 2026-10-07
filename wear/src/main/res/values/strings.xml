@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Heartline</string>
+    <string name="app_name">W7Link</string>
 
     <string name="metric_ecg">ECG</string>
     <string name="metric_bp">Blood pressure</string>
@@ -25,7 +25,7 @@
     <string name="ecg_keep_finger">Keep your fingertip on the key</string>
     <string name="ecg_lead_off">Touch the top key to continue</string>
     <string name="ecg_analyzing">Analyzing…</string>
-    <string name="ecg_view_on_phone">See details in Heartline on your phone.</string>
+    <string name="ecg_view_on_phone">See details in W7Link on your phone.</string>
     <string name="ecg_view_on_phone_short">Details on your phone</string>
     <string name="ecg_bpm_value">%1$d bpm</string>
 
@@ -39,12 +39,12 @@
     <string name="error_not_supported_title">Not supported</string>
     <string name="error_not_supported_body">This watch can\'t take this measurement.</string>
     <string name="error_service_missing_title">Service needed</string>
-    <string name="error_service_missing_body">Install Health Platform (Health Sensor Service) to use Heartline.</string>
+    <string name="error_service_missing_body">Install Health Platform (Health Sensor Service) to use W7Link.</string>
     <string name="action_install">Install</string>
     <string name="error_permission_title">Permission needed</string>
-    <string name="error_permission_body">Allow Heartline to read health sensors to take measurements.</string>
+    <string name="error_permission_body">Allow W7Link to read health sensors to take measurements.</string>
     <string name="error_service_title">Update required</string>
-    <string name="error_service_body">Update Health Platform (Health Sensor Service) to use Heartline.</string>
+    <string name="error_service_body">Update Health Platform (Health Sensor Service) to use W7Link.</string>
     <string name="error_policy_title">Developer mode off</string>
     <string name="error_policy_body">Turn on developer mode in Health Platform (Health Sensor Service).</string>
     <string name="error_off_body_title">Wear your watch</string>
@@ -110,7 +110,7 @@
     <string name="bp_calibration_recorded">Round %1$d recorded</string>
     <string name="bp_enter_cuff">Enter your cuff reading on the phone. The next round starts from there.</string>
     <string name="bp_needs_calibration_title">Calibrate first</string>
-    <string name="bp_needs_calibration_body">Blood pressure needs a calibration with 3 cuff readings in Heartline on your phone first.</string>
+    <string name="bp_needs_calibration_body">Blood pressure needs a calibration with 3 cuff readings in W7Link on your phone first.</string>
     <string name="bp_normal">Normal</string>
     <string name="bp_elevated">Elevated</string>
     <string name="bp_stage1">High · stage 1</string>
@@ -167,7 +167,7 @@
     <string name="stress_high">High</string>
     <string name="stress_hrv">HRV %1$d ms</string>
     <string name="profile_needed_title">Add your profile</string>
-    <string name="profile_needed_body">Enter your height, weight, birth year and sex in Heartline on your phone.</string>
+    <string name="profile_needed_body">Enter your height, weight, birth year and sex in W7Link on your phone.</string>
     <string name="tile_today_range_text">Today %1$d–%2$d</string>
     <string name="tile_body">Body composition</string>
     <string name="tile_body_fat">Body fat</string>
@@ -283,7 +283,7 @@
     <string name="state_off">Off</string>
     <string name="settings_irn">Irregular rhythm</string>
     <string name="settings_hr_alerts">High/low heart rate</string>
-    <string name="settings_change_on_phone">Change notifications in Heartline on your phone.</string>
+    <string name="settings_change_on_phone">Change notifications in W7Link on your phone.</string>
     <string name="diagnostics">Diagnostics</string>
     <string name="version">Version</string>
     <string name="diag_service">Health Sensor Service %1$s</string>
@@ -295,12 +295,12 @@
     <string name="dev_step_3">Tap Health Platform (Health Sensor Service). Not listed? Tap “See all apps” first.</string>
     <string name="dev_step_4">Quickly tap the “Health Platform” title at the top about 10 times.</string>
     <string name="dev_step_5">“[Dev mode]” appears under the title. If asked, tap OK.</string>
-    <string name="dev_mode_note">Tapping the title 10 times again turns it off. A watch update can switch it off; Heartline will tell you.</string>
-    <string name="open_request_title">Heartline</string>
+    <string name="dev_mode_note">Tapping the title 10 times again turns it off. A watch update can switch it off; W7Link will tell you.</string>
+    <string name="open_request_title">W7Link</string>
     <string name="open_request_text">Tap to start the measurement you picked on your phone.</string>
-    <string name="dev_mode_intro_off">Heartline can\'t read your sensors yet: developer mode is off in Health Platform (Health Sensor Service). Turn it on once:</string>
-    <string name="dev_mode_intro">Heartline reads the sensors through Health Platform (Health Sensor Service). It needs developer mode on:</string>
-    <string name="dev_step_6">Come back to Heartline and tap “Check again” below.</string>
+    <string name="dev_mode_intro_off">W7Link can\'t read your sensors yet: developer mode is off in Health Platform (Health Sensor Service). Turn it on once:</string>
+    <string name="dev_mode_intro">W7Link reads the sensors through Health Platform (Health Sensor Service). It needs developer mode on:</string>
+    <string name="dev_step_6">Come back to W7Link and tap “Check again” below.</string>
     <string name="dev_mode_show_on_phone">Show steps on phone</string>
     <string name="action_try_again">Try again</string>
     <string name="action_open_on_phone">Open phone</string>
@@ -309,22 +309,22 @@
     <string name="opened_on_phone">Continue on your phone.</string>
     <string name="open_on_phone_failed">Couldn\'t reach your phone.</string>
     <string name="link_checking_title">Connecting to phone</string>
-    <string name="link_checking_body">Making sure Heartline on your phone and watch know each other.</string>
+    <string name="link_checking_body">Making sure W7Link on your phone and watch know each other.</string>
     <string name="link_no_phone_title">Phone not connected</string>
-    <string name="link_no_phone_body">Heartline needs its phone app. Turn on Bluetooth on your phone and keep it close.</string>
-    <string name="link_app_missing_title">Install Heartline on phone</string>
-    <string name="link_app_missing_body">Your phone is connected, but Heartline isn\'t on it. Install it and open it once.</string>
-    <string name="link_no_response_title">Open Heartline on phone</string>
-    <string name="link_no_response_body">Heartline on your phone didn\'t answer. Open it there; the watch checks again by itself.</string>
-    <string name="link_incompatible_title">Update Heartline</string>
+    <string name="link_no_phone_body">W7Link needs its phone app. Turn on Bluetooth on your phone and keep it close.</string>
+    <string name="link_app_missing_title">Install W7Link on phone</string>
+    <string name="link_app_missing_body">Your phone is connected, but W7Link isn\'t on it. Install it and open it once.</string>
+    <string name="link_no_response_title">Open W7Link on phone</string>
+    <string name="link_no_response_body">W7Link on your phone didn\'t answer. Open it there; the watch checks again by itself.</string>
+    <string name="link_incompatible_title">Update W7Link</string>
     <string name="link_incompatible_body">The watch and phone apps are different versions. Install the same version on both.</string>
     <string name="setup_incomplete_title">Finish setup on phone</string>
     <string name="setup_terms_title">Accept terms on phone</string>
-    <string name="setup_terms_body">Open Heartline on your phone to accept the terms.</string>
-    <string name="setup_incomplete_body">Complete your profile in Heartline on your phone first.</string>
+    <string name="setup_terms_body">Open W7Link on your phone to accept the terms.</string>
+    <string name="setup_incomplete_body">Complete your profile in W7Link on your phone first.</string>
     <string name="setup_continues_automatically">The watch continues by itself when you\'re done.</string>
     <string name="setup_permissions_title">Allow sensor access</string>
-    <string name="setup_permissions_body">Heartline needs permission to read heart rate and other health sensors.</string>
+    <string name="setup_permissions_body">W7Link needs permission to read heart rate and other health sensors.</string>
     <string name="setup_checking_sensors_title">Checking sensors</string>
     <string name="setup_checking_sensors_body">Talking to Health Platform (Health Sensor Service).</string>
     <string name="offline_banner">Phone away · syncs later</string>
@@ -400,7 +400,7 @@
     <string name="settings_part_spo2">Blood oxygen</string>
     <string name="settings_part_temp">Skin temperature</string>
     <string name="settings_part_stress">Stress</string>
-    <string name="settings_setup_on_phone">Finish setting up health monitoring in Heartline on your phone</string>
+    <string name="settings_setup_on_phone">Finish setting up health monitoring in W7Link on your phone</string>
     <string name="heart_part_off_title">Turn off heart notifications?</string>
     <string name="heart_part_off_text">No more notices about high or low heart rate, irregular rhythm or resting trend. All-day heart rate keeps recording.</string>
     <string name="settings_heart_monitoring_learning">Learning your normal</string>
@@ -413,16 +413,16 @@
     <string name="monitoring_off_list">This turns off:\n• Heart notifications\n• Hourly blood oxygen\n• Skin temperature\n• Stress\n\nAll-day heart rate keeps recording.</string>
     <string name="all_day_off_title">Turn off all-day heart rate?</string>
     <string name="all_day_off_list">This stops recording your heart rate in the background, and with it:\n• Trends and your normal\n• High and low heart rate alerts\n• Irregular rhythm notifications\n• Resting heart rate trend</string>
-    <string name="all_day_off_sure_text">Heartline will no longer record your heart rate in the background or tell you about a high or low heart rate, an irregular rhythm, or changes in your resting heart rate.</string>
+    <string name="all_day_off_sure_text">W7Link will no longer record your heart rate in the background or tell you about a high or low heart rate, an irregular rhythm, or changes in your resting heart rate.</string>
     <string name="monitoring_off_sure_title">Are you sure?</string>
-    <string name="monitoring_off_sure_text">Heartline will no longer tell you about your heart rate and rhythm, low blood oxygen, a warmer than usual night or a stressful hour.</string>
+    <string name="monitoring_off_sure_text">W7Link will no longer tell you about your heart rate and rhythm, low blood oxygen, a warmer than usual night or a stressful hour.</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_turn_off">Turn off</string>
     <string name="action_keep_on">Keep on</string>
     <string name="settings_hr_alerts_range">Above %1$d or below %2$d bpm</string>
     <string name="settings_haptics">Vibration</string>
     <string name="settings_live_wave">Live wave</string>
-    <string name="settings_synced_with_phone">Synced with Heartline on your phone. Thresholds and reminders are on the phone.</string>
+    <string name="settings_synced_with_phone">Synced with W7Link on your phone. Thresholds and reminders are on the phone.</string>
     <string name="live_bpm">♥ %1$d bpm</string>
     <string name="live_hrv">HRV %1$d ms</string>
     <string name="hint_breathe">Breathe slowly and relax</string>
@@ -434,5 +434,6 @@
     <string name="diag_logs">Diagnostic logs</string>
     <string name="diag_logs_off">Off</string>
     <string name="diag_logs_on">On · %1$s kept (50 MB at most)</string>
-    <string name="diag_logs_hint">Change and export them in Heartline on your phone: Settings → Help &amp; diagnostics.</string>
+    <string name="diag_logs_hint">Change and export them in W7Link on your phone: Settings → Help &amp; diagnostics.</string>
+    <string name="companion_name">W7Link Eşlikçi</string>
 </resources>

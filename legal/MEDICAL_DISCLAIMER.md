@@ -1,5 +1,10 @@
 # Medical disclaimer
 
+> **W7Link is an unofficial fork of [Heartline](https://github.com/selin2005/heartline).** This document comes from
+> Heartline and applies to this fork's health features as written, with two differences: where it says "Heartline",
+> read "W7Link", and this fork has no update check, so it makes no network requests at all. The Heartline project
+> does not publish, support or endorse this build.
+
 **Heartline is not a medical device.** It is a general wellness app for adults. It has not been
 cleared or approved by the FDA or any other health authority.
 

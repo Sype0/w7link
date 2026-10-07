@@ -15,10 +15,13 @@ android {
 
     defaultConfig {
         // The in-app GitHub updater; off in the "play" build type.
-        buildConfigField("boolean", "UPDATER", "true")
+        // The in-app updater installs the official Heartline releases; it stays off in this fork.
+        buildConfigField("boolean", "UPDATER", "false")
         // Same applicationId as :wear — required by the Wearable Data Layer.
-        applicationId = "io.github.selin2005.heartline"
-        minSdk = 26
+        // An unofficial fork must not reuse Heartline's application ID (see README).
+        applicationId = "io.github.sype0.w7link.phone"
+        // The companion link needs the Android 12 Bluetooth permissions.
+        minSdk = 31
         targetSdk = 37
         // Set by the Build workflow: -Pheartline.versionName=1.2.0 -Pheartline.versionCode=<minutes since 2026>.
         versionCode = (findProperty("heartline.versionCode") ?: "1").toString().toInt()

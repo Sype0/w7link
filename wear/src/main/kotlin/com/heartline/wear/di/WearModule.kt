@@ -9,7 +9,7 @@ import com.heartline.wear.diag.WatchLogExporter
 import com.heartline.wear.diag.RawCapture
 import com.heartline.shared.diag.LogFiles
 import com.heartline.shared.diag.LogOffload
-import com.heartline.datalayer.DataLayerTransport
+import io.github.sype0.w7link.common.LinkTransport
 import com.heartline.shared.sync.Protocol
 import com.heartline.shared.sync.SyncTransport
 import com.heartline.shared.sync.WatchSyncEngine
@@ -97,7 +97,7 @@ val wearModule = module {
     single<HrSource> {
         if (BuildConfig.USE_FAKE_SENSORS) FakeHrSource() else SdkHrSource(get<SensorGateway>() as SdkSensorGateway)
     }
-    single { DataLayerTransport(androidContext(), Protocol.CAPABILITY_PHONE) } bind SyncTransport::class
+    single { LinkTransport() } bind SyncTransport::class
     single {
         WatchSyncEngine(
             get(),
@@ -155,11 +155,11 @@ val wearModule = module {
     }
     single { WatchLinkStore(androidContext()) }
     single { WatchCommandBus() }
-    single { RemoteOpener(androidContext(), get()) }
+    single { RemoteOpener() }
     single { PhoneOpener(get(), get()) }
     single {
         WatchLinkChecker(
-            get<DataLayerTransport>(),
+            get<LinkTransport>(),
             get(),
             get<WatchLinkStore>().latest,
             hello = { Hello(appVersion = BuildConfig.VERSION_NAME, deviceName = Build.MODEL, settings = get<WatchSettingsStore>().settings.value) },

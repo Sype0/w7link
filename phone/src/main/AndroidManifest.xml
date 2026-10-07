@@ -3,11 +3,23 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- In-app updates from GitHub releases (removed from the Google Play build, see src/play/). -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- The update download keeps going after leaving the app (WorkManager's foreground job). -->
+    <!-- No INTERNET permission: this fork has no in-app updater and makes no network requests. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- The companion link to the watch: BLE scan, then an encrypted L2CAP channel. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- App names and icons for the notifications that get forwarded to the watch. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- "Share with AI": which assistant apps are installed and accept shares (package visibility). -->
@@ -63,18 +75,42 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <service
-            android:name=".sync.PhoneSyncService"
-            android:exported="true">
+        <!-- Companion: the link to the watch, notification forwarding and its own screen. -->
+        <activity
+            android:name="io.github.sype0.w7link.phone.CompanionActivity"
+            android:exported="true"
+            android:label="@string/companion_name"
+            android:taskAffinity="io.github.sype0.w7link.companion"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight">
             <intent-filter>
-                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
-                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
-                <data
-                    android:host="*"
-                    android:pathPrefix="/hl/v1"
-                    android:scheme="wear" />
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="io.github.sype0.w7link.phone.LinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <service
+            android:name="io.github.sype0.w7link.phone.NotifListener"
+            android:exported="true"
+            android:label="@string/listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name="io.github.sype0.w7link.phone.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Home-screen widgets (Jetpack Glance). -->
         <activity

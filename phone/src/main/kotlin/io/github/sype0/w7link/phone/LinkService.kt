@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Sype0
+
 package io.github.sype0.w7link.phone
 
 import android.Manifest
@@ -27,13 +30,16 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Base64
 import android.util.Log
+import com.heartline.phone.R
 import io.github.sype0.w7link.common.Keys
+import io.github.sype0.w7link.common.LinkHub
 import io.github.sype0.w7link.common.Proto
 import io.github.sype0.w7link.common.SecureChannel
 import org.json.JSONObject
@@ -244,12 +250,17 @@ class LinkService : Service() {
                 setState(State.PAIRING)
             } else {
                 setState(State.CONNECTED)
-                onConnected()
+                onConnected(link)
             }
             while (true) {
-                val message = link.receive()
+                val (kind, body) = link.receiveFrame()
                 try {
-                    handle(message)
+                    if (kind == Proto.KIND_JSON) {
+                        handle(JSONObject(String(body)))
+                    } else if (state == State.CONNECTED) {
+                        // Heartline's sync traffic; only a paired peer gets this far.
+                        LinkHub.onFrame(kind, body)
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "bad message", e)
                 }
@@ -257,6 +268,7 @@ class LinkService : Service() {
         } catch (e: Exception) {
             Log.i(TAG, "link closed: $e")
         } finally {
+            LinkHub.detach()
             channel = null
             pairCode = null
             try {
@@ -272,7 +284,17 @@ class LinkService : Service() {
         }
     }
 
-    private fun onConnected() {
+    private fun onConnected(link: SecureChannel) {
+        LinkHub.attach { kind, body ->
+            try {
+                link.sendFrame(kind, body)
+                true
+            } catch (e: Exception) {
+                link.close()
+                false
+            }
+        }
+        send(Proto.msg("hello", "name" to Build.MODEL))
         main.post {
             lastBattery = ""
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { sendBattery(it) }
@@ -301,7 +323,7 @@ class LinkService : Service() {
             finishPairing()
             return
         }
-        if (state != State.CONNECTED) return
+        if (state != State.CONNECTED || LinkHub.onJson(m)) return
         when (type) {
             "dismiss" -> NotifListener.instance?.dismiss(m.getString("key"))
             "action" -> NotifListener.instance?.act(
@@ -341,7 +363,7 @@ class LinkService : Service() {
         prefs.edit().putString(PREF_PEER, Base64.encodeToString(link.peerKey, Base64.NO_WRAP)).apply()
         pairCode = null
         setState(State.CONNECTED)
-        onConnected()
+        onConnected(link)
     }
 
     fun cancelPairing() {
@@ -434,7 +456,7 @@ class LinkService : Service() {
         notifications.notify(
             NOTIFICATION_FIND,
             Notification.Builder(this, CHANNEL_FIND)
-                .setSmallIcon(R.drawable.ic_notification)
+                .setSmallIcon(R.drawable.ic_w7link)
                 .setContentTitle("Saat telefonu arıyor")
                 .setContentText("Susturmak için dokunun")
                 .setContentIntent(stop)
@@ -460,10 +482,10 @@ class LinkService : Service() {
 
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0, Intent(this, CompanionActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_LINK)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_w7link)
             .setContentTitle(statusText(state))
             .setContentIntent(open)
             .setOngoing(true)
@@ -496,7 +518,13 @@ class LinkService : Service() {
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
         fun start(context: Context) {
-            if (hasPermissions(context)) context.startForegroundService(Intent(context, LinkService::class.java))
+            if (!hasPermissions(context)) return
+            try {
+                context.startForegroundService(Intent(context, LinkService::class.java))
+            } catch (e: Exception) {
+                // Not allowed while the app is in the background; the next app open or boot starts it.
+                Log.w(TAG, "link service not started", e)
+            }
         }
 
         fun statusText(state: State) = when (state) {

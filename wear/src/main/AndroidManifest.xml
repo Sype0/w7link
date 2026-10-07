@@ -20,6 +20,10 @@
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!-- The companion link to the phone: BLE advertising, then an encrypted L2CAP channel. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -43,10 +47,10 @@
             android:name="com.google.android.wearable"
             android:required="true" />
 
-        <!-- Not standalone: setup (terms, profile) and history need the phone app. -->
+        <!-- The phone app is reached over the companion's own link, not the Wear OS data layer. -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
-            android:value="false" />
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"
@@ -57,7 +61,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- heartline://watch/<route>: opened straight from the phone (RemoteActivityHelper) and notifications. -->
+            <!-- heartline://watch/<route>: opened straight from the phone (over the companion link) and notifications. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -485,17 +489,34 @@
             </intent-filter>
         </receiver>
 
+        <!-- Companion: the link to the phone, mirrored notifications and its own screen. -->
+        <activity
+            android:name="io.github.sype0.w7link.wear.CompanionActivity"
+            android:exported="true"
+            android:label="@string/companion_name"
+            android:taskAffinity="io.github.sype0.w7link.companion">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <service
-            android:name=".sync.WatchSyncService"
+            android:name="io.github.sype0.w7link.wear.LinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|health" />
+
+        <receiver
+            android:name="io.github.sype0.w7link.wear.ActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.github.sype0.w7link.wear.BootReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
-                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
-                <data
-                    android:host="*"
-                    android:pathPrefix="/hl/v1"
-                    android:scheme="wear" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
-        </service>
+        </receiver>
     </application>
 </manifest>

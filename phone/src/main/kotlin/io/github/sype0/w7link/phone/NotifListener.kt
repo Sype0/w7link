@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Sype0
+
 package io.github.sype0.w7link.phone
 
 import android.app.ActivityOptions

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Sype0
+
 package io.github.sype0.w7link.wear
 
 import android.Manifest
@@ -33,6 +36,7 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -43,7 +47,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Base64
 import android.util.Log
+import com.heartline.wear.R
 import io.github.sype0.w7link.common.Keys
+import io.github.sype0.w7link.common.LinkHub
 import io.github.sype0.w7link.common.Proto
 import io.github.sype0.w7link.common.SecureChannel
 import org.json.JSONArray
@@ -55,11 +61,10 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
-import kotlin.math.roundToInt
 
 /**
  * The watch end of the link: advertises over BLE, accepts the phone's L2CAP
- * channel, shows what the phone sends, and samples heart rate and steps.
+ * channel, shows what the phone sends, and counts steps. Heart data is Heartline's job.
  */
 @SuppressLint("MissingPermission")
 class LinkService : Service(), SensorEventListener {
@@ -90,10 +95,6 @@ class LinkService : Service(), SensorEventListener {
     var findingPhone = false
         private set
 
-    @Volatile
-    var lastHeartRate = 0
-        private set
-
     val stepsToday: Int
         get() = if (prefs.getString(PREF_STEP_DAY, null) == today()) prefs.getInt(PREF_STEPS, 0) else 0
 
@@ -116,7 +117,6 @@ class LinkService : Service(), SensorEventListener {
     private var registered = false
 
     private var sampling = false
-    private var sampleHeartRate = 0
     private val pending = ArrayList<JSONObject>()
 
     private var ringtone: Ringtone? = null
@@ -218,9 +218,7 @@ class LinkService : Service(), SensorEventListener {
 
     private fun enterForeground(): Boolean {
         val notification = statusNotification()
-        val canSample = granted(Manifest.permission.ACTIVITY_RECOGNITION) ||
-            (granted(Manifest.permission.BODY_SENSORS) && granted(Manifest.permission.BODY_SENSORS_BACKGROUND))
-        if (canSample) {
+        if (granted(Manifest.permission.ACTIVITY_RECOGNITION)) {
             try {
                 startForeground(
                     NOTIFICATION_LINK, notification,
@@ -333,12 +331,17 @@ class LinkService : Service(), SensorEventListener {
                 setState(State.PAIRING)
             } else {
                 setState(State.CONNECTED)
-                onConnected()
+                onConnected(link)
             }
             while (true) {
-                val message = link.receive()
+                val (kind, body) = link.receiveFrame()
                 try {
-                    handle(message)
+                    if (kind == Proto.KIND_JSON) {
+                        handle(JSONObject(String(body)))
+                    } else if (state == State.CONNECTED) {
+                        // Heartline's sync traffic; only a paired peer gets this far.
+                        LinkHub.onFrame(kind, body)
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "bad message", e)
                 }
@@ -346,6 +349,7 @@ class LinkService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.i(TAG, "link closed: $e")
         } finally {
+            LinkHub.detach()
             channel = null
             pairCode = null
             findingPhone = false
@@ -356,7 +360,17 @@ class LinkService : Service(), SensorEventListener {
         }
     }
 
-    private fun onConnected() {
+    private fun onConnected(link: SecureChannel) {
+        LinkHub.attach { kind, body ->
+            try {
+                link.sendFrame(kind, body)
+                true
+            } catch (e: Exception) {
+                link.close()
+                false
+            }
+        }
+        send(Proto.msg("hello", "name" to Build.MODEL))
         main.post {
             lastBattery = ""
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { sendBattery(it) }
@@ -385,7 +399,7 @@ class LinkService : Service(), SensorEventListener {
             finishPairing()
             return
         }
-        if (state != State.CONNECTED) return
+        if (state != State.CONNECTED || LinkHub.onJson(m)) return
         when (type) {
             "notif" -> showNotification(m)
             "notif_rm" -> notifications.cancel(m.getString("key"), NOTIFICATION_MIRROR)
@@ -425,7 +439,7 @@ class LinkService : Service(), SensorEventListener {
         prefs.edit().putString(PREF_PEER, Base64.encodeToString(link.peerKey, Base64.NO_WRAP)).apply()
         pairCode = null
         setState(State.CONNECTED)
-        onConnected()
+        onConnected(link)
     }
 
     fun cancelPairing() {
@@ -448,7 +462,7 @@ class LinkService : Service(), SensorEventListener {
         val call = m.optBoolean("call")
         val text = m.optString("text")
         val builder = Notification.Builder(this, if (call) CHANNEL_CALL else CHANNEL_MIRROR)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_w7link)
             .setContentTitle(m.optString("title"))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
@@ -506,39 +520,19 @@ class LinkService : Service(), SensorEventListener {
         )
     }
 
-    /** Takes one heart rate reading and the current step count, then turns the sensors back off. */
+    /** Reads the step counter once, then turns the sensor back off. */
     fun sample() {
-        if (sampling) return
+        if (sampling || !granted(Manifest.permission.ACTIVITY_RECOGNITION)) return
         val sensors = getSystemService(SensorManager::class.java)
-        val heart = if (granted(Manifest.permission.BODY_SENSORS)) sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE) else null
-        val steps = if (granted(Manifest.permission.ACTIVITY_RECOGNITION)) sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) else null
-        if (heart == null && steps == null) return
+        val steps = sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
         sampling = true
-        sampleHeartRate = 0
         wakeLock.acquire(SAMPLE_WINDOW_MS + 5_000)
-        heart?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, main) }
-        steps?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, main) }
-        // The optical sensor needs a while to lock on; give up if the watch isn't on a wrist.
-        main.postDelayed(finishSample, if (heart != null) SAMPLE_WINDOW_MS else 3_000)
-        notifyUi()
+        sensors.registerListener(this, steps, SensorManager.SENSOR_DELAY_NORMAL, main)
+        main.postDelayed(finishSample, SAMPLE_WINDOW_MS)
     }
 
-    val isSampling: Boolean
-        get() = sampling
-
     override fun onSensorChanged(event: SensorEvent) {
-        when (event.sensor.type) {
-            Sensor.TYPE_HEART_RATE -> {
-                val usable = event.accuracy != SensorManager.SENSOR_STATUS_NO_CONTACT &&
-                    event.accuracy != SensorManager.SENSOR_STATUS_UNRELIABLE
-                if (sampling && sampleHeartRate == 0 && usable && event.values[0] > 0f) {
-                    sampleHeartRate = event.values[0].roundToInt()
-                    main.removeCallbacks(finishSample)
-                    main.postDelayed(finishSample, 1_000)
-                }
-            }
-            Sensor.TYPE_STEP_COUNTER -> addSteps(event.values[0].toLong())
-        }
+        if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) addSteps(event.values[0].toLong())
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -564,8 +558,7 @@ class LinkService : Service(), SensorEventListener {
         getSystemService(SensorManager::class.java).unregisterListener(this)
         sampling = false
         if (wakeLock.isHeld) wakeLock.release()
-        if (sampleHeartRate > 0) lastHeartRate = sampleHeartRate
-        val record = Proto.msg("health", "ts" to System.currentTimeMillis(), "hr" to sampleHeartRate, "steps" to stepsToday)
+        val record = Proto.msg("health", "ts" to System.currentTimeMillis(), "hr" to 0, "steps" to stepsToday)
         synchronized(pending) {
             pending.add(record)
             // Kept until the phone confirms it; about three weeks' worth if it never does.
@@ -630,7 +623,7 @@ class LinkService : Service(), SensorEventListener {
         notifications.notify(
             NOTIFICATION_FIND,
             Notification.Builder(this, CHANNEL_FIND)
-                .setSmallIcon(R.drawable.ic_notification)
+                .setSmallIcon(R.drawable.ic_w7link)
                 .setContentTitle("Telefon saati arıyor")
                 .setContentText("Susturmak için dokunun")
                 .setContentIntent(stop)
@@ -656,10 +649,10 @@ class LinkService : Service(), SensorEventListener {
 
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0, Intent(this, CompanionActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_LINK)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_w7link)
             .setContentTitle(statusText(state))
             .setContentIntent(open)
             .setOngoing(true)
@@ -681,7 +674,7 @@ class LinkService : Service(), SensorEventListener {
         private const val PREF_STEP_DAY = "stepDay"
         private const val PREF_STEPS = "steps"
         private const val SAMPLE_INTERVAL_MS = 10 * 60_000L
-        private const val SAMPLE_WINDOW_MS = 30_000L
+        private const val SAMPLE_WINDOW_MS = 3_000L
         private const val MAX_PENDING = 3_000
         private const val RING_TIMEOUT_MS = 30_000L
 
@@ -702,7 +695,13 @@ class LinkService : Service(), SensorEventListener {
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
         fun start(context: Context) {
-            if (hasPermissions(context)) context.startForegroundService(Intent(context, LinkService::class.java))
+            if (!hasPermissions(context)) return
+            try {
+                context.startForegroundService(Intent(context, LinkService::class.java))
+            } catch (e: Exception) {
+                // Not allowed while the app is in the background; the next app open or boot starts it.
+                Log.w(TAG, "link service not started", e)
+            }
         }
 
         fun statusText(state: State) = when (state) {

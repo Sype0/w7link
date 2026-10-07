@@ -34,7 +34,7 @@ object FileNames {
     /** e.g. Heartline_ECG_Sara-Karimi_2026-09-24_14-32 */
     fun default(kind: String, person: String?, at: LocalDateTime): String {
         val who = person?.trim()?.replace(Regex("\\s+"), "-")?.replace(forbidden, "")?.takeIf { it.isNotEmpty() }
-        return listOfNotNull("Heartline", kind, who, at.format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm"))).joinToString("_")
+        return listOfNotNull("W7Link", kind, who, at.format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm"))).joinToString("_")
     }
 }
 

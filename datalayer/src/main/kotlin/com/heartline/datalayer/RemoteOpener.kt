@@ -3,43 +3,74 @@
 
 package com.heartline.datalayer
 
-import com.heartline.datalayer.diag.HLog
-import android.content.Context
+import android.app.Activity
+import android.app.Application
 import android.content.Intent
 import android.net.Uri
-import androidx.wear.remote.interactions.RemoteActivityHelper
-import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.concurrent.Executors
-import kotlin.coroutines.resume
+import android.os.Bundle
+import com.heartline.datalayer.diag.HLog
+import io.github.sype0.w7link.common.LinkHub
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * Opens a Heartline screen on the other device right away (no notification to tap), via a
- * `heartline://` deep link the other app's MainActivity handles.
+ * Opens a screen on the other device right away (no notification to tap), via a `heartline://`
+ * deep link the other app's MainActivity handles. The request travels over the companion link;
+ * the other app only honours it while it is on screen, because Android blocks activity launches
+ * from the background.
  */
-class RemoteOpener(context: Context, private val transport: DataLayerTransport) {
-    private val helper = RemoteActivityHelper(context.applicationContext, Executors.newSingleThreadExecutor())
-
-    /** @return true when the other device accepted the launch. */
+class RemoteOpener {
+    /** @return true when the other device opened the screen. */
     suspend fun open(uri: String): Boolean {
-        val node = transport.peerNodeId() ?: return false.also { HLog.w(TAG, "open $uri: no peer") }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addCategory(Intent.CATEGORY_BROWSABLE)
-        return suspendCancellableCoroutine { cont ->
-            val future = runCatching { helper.startRemoteActivity(intent, node) }.getOrElse {
-                HLog.w(TAG, "open $uri failed", it)
-                cont.resume(false)
-                return@suspendCancellableCoroutine
-            }
-            future.addListener({
-                val ok = runCatching { future.get() }.onFailure { HLog.w(TAG, "open $uri failed", it) }.isSuccess
-                if (ok) HLog.i(TAG, "opened $uri on $node")
-                if (cont.isActive) cont.resume(ok)
-            }, Runnable::run)
-        }
+        val reply = LinkHub.requestOpen(uri) ?: return false.also { HLog.w(TAG, "open $uri: no peer") }
+        val ok = withContext(Dispatchers.IO) { runCatching { reply.get(TIMEOUT_S, TimeUnit.SECONDS) }.getOrDefault(false) }
+        HLog.i(TAG, "open $uri -> $ok")
+        return ok
     }
 
     private companion object {
         const val TAG = "Heartline/Open"
+        const val TIMEOUT_S = 3L
     }
+}
+
+/** Answers the other device's open requests: launches the deep link when one of this app's activities is showing. */
+class ForegroundOpener(private val app: Application) : Application.ActivityLifecycleCallbacks {
+    @Volatile
+    private var started = 0
+
+    init {
+        app.registerActivityLifecycleCallbacks(this)
+        LinkHub.localOpener = ::open
+    }
+
+    private fun open(uri: String): Boolean {
+        if (started == 0) return false
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .setPackage(app.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { app.startActivity(intent) }.onFailure { HLog.w("Heartline/Open", "open $uri failed", it) }.isSuccess
+    }
+
+    override fun onActivityStarted(activity: Activity) {
+        started++
+    }
+
+    override fun onActivityStopped(activity: Activity) {
+        started--
+    }
+
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+
+    override fun onActivityResumed(activity: Activity) {}
+
+    override fun onActivityPaused(activity: Activity) {}
+
+    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+
+    override fun onActivityDestroyed(activity: Activity) {}
 }
 
 /** Deep links understood by each app's MainActivity. */

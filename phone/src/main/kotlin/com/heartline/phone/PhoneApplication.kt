@@ -4,6 +4,10 @@
 package com.heartline.phone
 
 import com.heartline.datalayer.diag.HLog
+import com.heartline.datalayer.ForegroundOpener
+import com.heartline.phone.sync.PhoneLinkReceiver
+import io.github.sype0.w7link.common.LinkHub
+import io.github.sype0.w7link.phone.LinkService
 import android.app.Application
 import com.heartline.phone.data.BpRepository
 import com.heartline.phone.link.PhoneStatusPublisher
@@ -52,6 +56,10 @@ class PhoneApplication : Application() {
         }
         HLog.i("Heartline/App", "phone app ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}) on ${android.os.Build.MODEL}, API ${android.os.Build.VERSION.SDK_INT}")
         val scope = get<CoroutineScope>(APP_SCOPE)
+        // Sync with the watch runs over the companion link instead of the Wearable Data Layer.
+        LinkHub.receiver = PhoneLinkReceiver(get(), get(), get(), get(), scope)
+        ForegroundOpener(this)
+        LinkService.start(this)
         scope.launch {
             val settings = get<SettingsRepository>()
             if (settings.claimDemoPurge()) purgeDemoData()

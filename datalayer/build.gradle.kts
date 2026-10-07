@@ -21,7 +21,5 @@ android {
 
 dependencies {
     api(project(":shared"))
-    api(libs.play.services.wearable)
-    implementation(libs.kotlinx.coroutines.play.services)
-    implementation(libs.wear.remote.interactions)
+    testImplementation(libs.junit)
 }

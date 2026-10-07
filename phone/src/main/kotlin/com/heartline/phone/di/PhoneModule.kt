@@ -16,7 +16,7 @@ import com.heartline.phone.update.UpdateRepository
 import com.heartline.phone.update.Updater
 import com.heartline.phone.update.UpdatesViewModel
 import com.heartline.phone.update.WorkManagerDownloads
-import com.heartline.datalayer.DataLayerTransport
+import io.github.sype0.w7link.common.LinkTransport
 import com.heartline.datalayer.RemoteOpener
 import com.heartline.phone.link.PhoneStatusPublisher
 import com.heartline.phone.link.WatchOpener
@@ -82,7 +82,7 @@ val phoneModule = module {
     single { get<HeartlineDatabase>().records() }
     single { WaveStore(androidContext().filesDir) }
     single { RecordRepository(get(), get()) }
-    single { DataLayerTransport(androidContext(), Protocol.CAPABILITY_WATCH) } bind SyncTransport::class
+    single { LinkTransport() } bind SyncTransport::class
     single { PhoneNotifier(androidContext()) }
     single { EcgSecondOpinion.fromAssets(androidContext()) }
     single { get<HeartlineDatabase>().heart() }
@@ -183,7 +183,7 @@ val phoneModule = module {
         )
     }
     single { PhoneStatusPublisher(get(), get(), get(), { get() }) }
-    single { RemoteOpener(androidContext(), get()) }
+    single { RemoteOpener() }
     single { WatchOpener(get(), get()) { get() } }
     factory {
         val ctx = androidContext()
