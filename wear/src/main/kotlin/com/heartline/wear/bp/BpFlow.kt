@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Selin and Heartline contributors
+
+package com.heartline.wear.bp
+
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Sensors
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import com.heartline.shared.sync.SetupTarget
+import com.heartline.wear.link.PhoneOpener
+import com.heartline.wear.ui.setup.CheckingScreen
+import kotlinx.coroutines.launch
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.heartline.shared.model.Metric
+import com.heartline.shared.sensor.PermissionPolicy
+import com.heartline.wear.R
+import com.heartline.wear.ui.components.Buzz
+import com.heartline.wear.ui.components.rememberBuzz
+import com.heartline.wear.sensor.SensorGateway
+import com.heartline.wear.sensor.SensorProblem
+import com.heartline.wear.ui.screens.BpCalibrationRecordedScreen
+import com.heartline.wear.ui.screens.BpCalibrationRetryScreen
+import com.heartline.wear.ui.screens.BpInstructionScreen
+import com.heartline.wear.ui.screens.BpNeedsCalibrationScreen
+import com.heartline.wear.ui.screens.BpMeasuringScreen
+import com.heartline.wear.ui.screens.BpOutOfRangeScreen
+import com.heartline.wear.ui.screens.BpResultScreen
+import com.heartline.wear.ui.screens.MeasuringScreen
+import com.heartline.wear.ui.screens.SensorErrorScreen
+import com.heartline.wear.ui.theme.WearColors
+import org.koin.androidx.compose.koinViewModel
+import com.heartline.wear.monitor.WatchSettingsStore
+import org.koin.compose.koinInject
+
+/**
+ * Blood pressure on the watch. With [calibrationSession] the screen stays open for the whole
+ * phone-driven calibration: each round the phone starts begins measuring here automatically.
+ */
+@Composable
+fun BpFlow(
+    onExit: () -> Unit,
+    calibrationSession: Boolean = false,
+    onStartCalibration: () -> Unit = {},
+    vm: BpMeasureViewModel = koinViewModel(),
+    gateway: SensorGateway = koinInject(),
+    phone: PhoneOpener = koinInject(),
+    settingsStore: WatchSettingsStore = koinInject(),
+) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val prefs by settingsStore.settings.collectAsStateWithLifecycle()
+    val buzz = prefs.haptics
+    val capture by vm.pendingCapture.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var opened by remember { mutableStateOf<Boolean?>(null) }
+    val context = LocalContext.current
+    val activity = LocalActivity.current
+    val haptics = LocalHapticFeedback.current
+    val permissions = PermissionPolicy.permissionsFor(Metric.BLOOD_PRESSURE, Build.VERSION.SDK_INT).toTypedArray()
+    var mode by remember { mutableStateOf(BpMode.QUICK) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { if (it.values.all { ok -> ok }) vm.start(mode, calibrationSession) }
+    fun start(chosen: BpMode = BpMode.QUICK) {
+        mode = chosen
+        val missing = permissions.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) vm.start(chosen, calibrationSession) else launcher.launch(missing.toTypedArray())
+    }
+
+    LaunchedEffect(Unit) { if (!calibrationSession) vm.checkReady() }
+    // A round requested by the phone starts right away while this screen is open.
+    LaunchedEffect(calibrationSession, capture, state is BpState.Idle || state is BpState.CalibrationRecorded) {
+        if (calibrationSession && capture != null && (state is BpState.Idle || state is BpState.CalibrationRecorded)) start(if (capture?.precise == true) BpMode.PRECISE else BpMode.QUICK)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (state is BpState.Measuring) vm.cancel() }
+    DisposableEffect(Unit) { onDispose { vm.cancel() } }
+    val measuring = state as? BpState.Measuring
+    val view = LocalView.current
+    DisposableEffect(measuring != null) {
+        view.keepScreenOn = measuring != null
+        onDispose { view.keepScreenOn = false }
+    }
+    val vibrate = rememberBuzz(buzz)
+    LaunchedEffect(measuring != null) { if (measuring != null) vibrate(Buzz.STARTED) }
+    LaunchedEffect(state is BpState.Done || state is BpState.CalibrationRecorded) {
+        when (val s = state) {
+            is BpState.Done -> vibrate(
+                if (!s.wideRange && (s.category == com.heartline.shared.bp.BpCategory.NORMAL || s.category == com.heartline.shared.bp.BpCategory.ELEVATED)) Buzz.DONE else Buzz.ATTENTION,
+            )
+            is BpState.CalibrationRecorded -> vibrate(Buzz.DONE)
+            else -> Unit
+        }
+    }
+    val done = {
+        vm.reset()
+        onExit()
+    }
+
+    when (val s = state) {
+        BpState.Idle -> if (calibrationSession && capture == null) {
+            CheckingScreen(Icons.Rounded.PhoneAndroid, stringResource(R.string.bp_waiting_phone_title), stringResource(R.string.bp_waiting_phone_body))
+        } else {
+            BpInstructionScreen(
+                capture?.round,
+                onStart = { start() },
+                onPrecise = if (vm.preciseAvailable && capture == null) ({ start(BpMode.PRECISE) }) else null,
+                precise = capture?.precise == true,
+            )
+        }
+        BpState.NeedsCalibration -> BpNeedsCalibrationScreen(
+            onOpenOnPhone = {
+                scope.launch {
+                    opened = phone.open(SetupTarget.BP_CALIBRATION)
+                    if (opened == true) onStartCalibration()
+                }
+            },
+            opened = opened,
+        )
+        is BpState.Measuring -> BpMeasuringScreen(
+            progress = s.progress,
+            secondsLeft = s.secondsLeft,
+            trace = s.trace,
+            contact = s.contact,
+            bpm = s.bpm,
+            endIndex = s.endIndex,
+            calibrationRound = capture?.round,
+            showWave = prefs.liveWave,
+            settling = s.settling,
+            phase = s.phase,
+        )
+        BpState.Preparing -> CheckingScreen(Icons.Rounded.Sensors, stringResource(R.string.metric_bp), stringResource(R.string.bp_preparing))
+        is BpState.Done -> BpResultScreen(
+            s.systolic,
+            s.diastolic,
+            s.pulse,
+            s.category,
+            s.uncertainty,
+            beyondCalibration = s.beyondCalibration,
+            confirmed = s.confirmed,
+            safety = s.safety,
+            notValidated = s.notValidated,
+            ectopicBeats = s.ectopicBeats,
+            bodyState = s.bodyState,
+            channels = s.channels,
+            postureDiffers = s.postureDiffers,
+            wideRange = s.wideRange,
+            onMeasureAgain = { start(mode) },
+            onDone = done,
+        )
+        BpState.OutOfRange -> BpOutOfRangeScreen(onRetry = { vm.reset() })
+        BpState.Moving -> BpOutOfRangeScreen(moving = true, onRetry = { vm.reset() })
+        is BpState.CalibrationRecorded -> BpCalibrationRecordedScreen(s.round, onDone = done)
+        is BpState.CalibrationRetry -> BpCalibrationRetryScreen(s.round, onRetry = { start() })
+        BpState.PoorSignal -> SensorErrorScreen(SensorProblem.OFF_BODY, onAction = { vm.reset() })
+        is BpState.Failed -> SensorErrorScreen(s.problem, onAction = {
+            if (s.problem == SensorProblem.SERVICE_MISSING || s.problem == SensorProblem.SERVICE_OUTDATED) activity?.let(gateway::resolve) else done()
+        })
+    }
+}

@@ -1,0 +1,745 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Selin and Heartline contributors
+
+package com.heartline.wear.bp
+
+import com.heartline.datalayer.diag.HLog
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.heartline.shared.bp.BpCalibration
+import com.heartline.shared.bp.BpCategory
+import com.heartline.shared.bp.BpChannel
+import com.heartline.shared.bp.BpConfirmation
+import com.heartline.shared.bp.BpEstimator
+import com.heartline.shared.bp.BpOutcome
+import com.heartline.shared.bp.BpPipeline
+import com.heartline.shared.bp.BpSafety
+import com.heartline.shared.bp.BpSessionHeader
+import com.heartline.shared.bp.BpSessionInput
+import com.heartline.shared.bp.BpSessionRecorder
+import com.heartline.shared.bp.BpSessionStreams
+import com.heartline.shared.bp.BpWindowSelector
+import com.heartline.shared.bp.HemodynamicState
+import com.heartline.shared.bp.PpgFeatureVector
+import com.heartline.shared.bp.PpgFeatures
+import com.heartline.shared.bp.PreciseInput
+import com.heartline.shared.bp.PulseRate
+import com.heartline.shared.bp.RecentRhythm
+import com.heartline.shared.bp.CalibrationPoint
+import com.heartline.shared.model.EcgResult
+import kotlinx.coroutines.flow.first
+import com.heartline.shared.dsp.StreamingPpgFilter
+import com.heartline.shared.model.RecordKind
+import com.heartline.shared.model.RecordMeta
+import com.heartline.shared.model.RecordSummary
+import com.heartline.shared.sync.CaptureRequest
+import com.heartline.shared.sync.CaptureResult
+import com.heartline.shared.sync.Protocol
+import com.heartline.wear.data.WatchRecordStore
+import com.heartline.wear.sensor.BpAuxSensors
+import com.heartline.wear.sensor.EcgSource
+import com.heartline.wear.sensor.ImuRecorder
+import com.heartline.wear.sensor.MotionMeter
+import com.heartline.wear.sensor.PpgSource
+import com.heartline.wear.sensor.SensorException
+import com.heartline.wear.sensor.SensorProblem
+import com.heartline.wear.sensor.SyncScheduler
+import com.heartline.wear.diag.RawCapture
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import java.util.UUID
+
+/** Quick: PPG + motion, 20–60 s, no touch. Precise: finger on the key (ECG), with the arm-raise maneuver. */
+enum class BpMode { QUICK, PRECISE }
+
+/** What the user is asked to do during a precise recording (the arm-raise maneuver), by elapsed seconds. */
+enum class BpPhase(val untilSeconds: Int) {
+    REST(12),
+    RAISE(18),
+    HOLD_UP(20),
+    LOWER(26),
+    REST_AGAIN(34),
+    ;
+
+    companion object {
+        const val TOTAL_SECONDS = 34
+
+        fun at(seconds: Double): BpPhase = entries.firstOrNull { seconds < it.untilSeconds } ?: REST_AGAIN
+    }
+}
+
+sealed interface BpState {
+    data object Idle : BpState
+
+    data object NeedsCalibration : BpState
+
+    /** Reading skin temperature / conductance before the main recording. */
+    data object Preparing : BpState
+
+    /**
+     * [trace]: filtered, upright PPG for the sweep; [bpm]: live pulse. [settling]: the minimum
+     * time is over and the recording continues until the pulse is steady. [phase]: the maneuver
+     * step in precise mode; [contact]: in precise mode, the finger on the key.
+     */
+    data class Measuring(
+        val progress: Float,
+        val secondsLeft: Int,
+        val trace: FloatArray,
+        val contact: Boolean,
+        val bpm: Int? = null,
+        val endIndex: Long = trace.size.toLong(),
+        val settling: Boolean = false,
+        val phase: BpPhase? = null,
+    ) : BpState
+
+    /**
+     * [beyondCalibration]: an extrapolation (shown, with its wider ±). [confirmed]: a second
+     * reading within 10 minutes agreed. [safety]: very high or low, check with a cuff.
+     * Algorithm 6: always one number with its ±; [bodyState] and [channels] say what it rests
+     * on; [notValidated]: a condition (pregnancy) cuffless readings aren't validated for;
+     * [ectopicBeats]: premature beats that were left out.
+     */
+    data class Done(
+        val systolic: Int,
+        val diastolic: Int,
+        val pulse: Int,
+        val category: BpCategory,
+        val uncertainty: Int = 0,
+        val beyondCalibration: Boolean = false,
+        val confirmed: Boolean = false,
+        val safety: BpSafety = BpSafety.NONE,
+        val uncertaintyDia: Int = 0,
+        val notValidated: Boolean = false,
+        val ectopicBeats: Int = 0,
+        val bodyState: HemodynamicState = HemodynamicState.STEADY,
+        val channels: List<BpChannel> = emptyList(),
+        val postureDiffers: Boolean = false,
+        /** The ± is too wide for a category: the number and ± are shown without one. */
+        val wideRange: Boolean = false,
+    ) : BpState {
+        val needsConfirming get() = (beyondCalibration || safety != BpSafety.NONE) && !confirmed
+    }
+
+    /** The recording isn't a trustworthy pulse wave (never used for a real change in pressure). */
+    data object OutOfRange : BpState
+
+    /** The arm moved during the recording. */
+    data object Moving : BpState
+
+    data class CalibrationRecorded(val round: Int) : BpState
+
+    /** The calibration round wasn't steady or clean enough to calibrate on: take it again. */
+    data class CalibrationRetry(val round: Int) : BpState
+
+    data object PoorSignal : BpState
+
+    data class Failed(val problem: SensorProblem) : BpState
+}
+
+/**
+ * One blood-pressure session (algorithm 6, docs/algorithms/BP_ALGORITHM.md).
+ *
+ * - Quick mode: skin temperature and conductance first (when the watch has them), then green,
+ *   infrared and red PPG with the accelerometer, gyroscope and rotation vector, for at least
+ *   [minSeconds] and until the pulse is steady (at most [maxSeconds]; 45 s for an irregular rhythm).
+ * - Precise mode: ECG with its PPG and the motion sensors for [BpPhase.TOTAL_SECONDS], with the
+ *   arm-raise maneuver in the middle.
+ *
+ * Every sample of every sensor, every intermediate value and the result are written to a raw
+ * session log ([BpSessionLog]) that goes to the phone, for developing the algorithm on real data.
+ * In measure mode the session becomes a reading; in calibration mode its channels are sent to the
+ * phone, where they are paired with the user's cuff reading.
+ */
+class BpMeasureViewModel(
+    private val source: PpgSource,
+    private val bpStore: WatchBpStore,
+    private val records: WatchRecordStore,
+    private val sync: SyncScheduler,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val minSeconds: Int = BpWindowSelector.WINDOW_SECONDS,
+    private val uiIntervalMs: Long = 40,
+    private val imu: ImuRecorder = ImuRecorder.NONE,
+    private val ecg: EcgSource? = null,
+    private val aux: BpAuxSensors = BpAuxSensors.NONE,
+    private val heightCm: () -> Double? = { null },
+    private val device: String = "",
+    private val appVersion: String = "",
+    private val maxSeconds: Int = BpWindowSelector.MAX_SECONDS,
+) : ViewModel() {
+    private val mutable = MutableStateFlow<BpState>(BpState.Idle)
+    val state: StateFlow<BpState> = mutable.asStateFlow()
+    private var job: Job? = null
+
+    /** Calibration capture requested by the phone, if any. */
+    val pendingCapture: StateFlow<CaptureRequest?> get() = bpStore.pendingCapture
+
+    /**
+     * Precise mode (ECG) is experimental: it needs the ECG sensor and a calibration with pulse
+     * arrival times from the same ECG-channel PPG. Calibration itself is always quick mode, so it
+     * never records an ECG unasked.
+     */
+    val preciseAvailable: Boolean
+        get() = ecg != null && (bpStore.calibration.value?.timedPoints()?.count { it.first.patMs != null && it.first.featureFs == CalibrationPoint.PRECISE_FS } ?: 0) >= 2
+
+    /** The raw capture session while measuring (see [start]), and the session log (for [cancel]). */
+    private var rawId = ""
+    private var active: ActiveSession? = null
+
+    private class ActiveSession(val id: String, val log: BpSessionRecorder, val header: BpSessionHeader.() -> BpSessionHeader) {
+        @Volatile var finished = false
+    }
+
+    fun checkReady() {
+        if (bpStore.calibration.value?.isValid(now()) != true) mutable.value = BpState.NeedsCalibration
+    }
+
+    /**
+     * [calibrationSession]: this screen was opened for the phone's calibration, so the round the
+     * phone asked for is recorded. Otherwise it is always a measurement: a request left over from
+     * an unfinished round must never turn it into a calibration round.
+     */
+    fun start(mode: BpMode = BpMode.QUICK, calibrationSession: Boolean = false) {
+        // Only a session still recording blocks a new one: a finished job may be "active" for a
+        // moment after publishing its result, and "Measure again" must not be lost to that.
+        val recording = mutable.value is BpState.Preparing || mutable.value is BpState.Measuring
+        if (job?.isActive == true && recording) return
+        val capture = if (calibrationSession) bpStore.currentCapture(now()) else null
+        HLog.i(TAG, "BP start: ${capture?.let { "calibration round ${it.round}" } ?: "measure"} (calibrationSession=$calibrationSession)")
+        if (capture == null && bpStore.calibration.value?.isValid(now()) != true) {
+            bpStore.calibration.value?.let { HLog.i(TAG, "BP needs calibration: ${BpPipeline.needsCalibrationReason(it, now())}") }
+            mutable.value = BpState.NeedsCalibration
+            return
+        }
+        // Calibration rounds are always quick: the same PPG source as every quick measurement.
+        val effective = if (capture == null && mode == BpMode.PRECISE && preciseAvailable) BpMode.PRECISE else BpMode.QUICK
+        val startedAt = now()
+        val id = UUID.randomUUID().toString()
+        val log = BpSessionRecorder(id, if (capture != null) "calibration" else "measure", startedAt, now)
+        // This flow's own log has every sensor it uses; the raw session next to it keeps every
+        // value of every tracker as the SDK gave it (ECG sequence and thresholds, the heart-rate
+        // tracker's beat intervals, temperature status), linked by the session id.
+        rawId = RawCapture.begin("bp_raw", mapOf("bpSession" to id))
+        val header: BpSessionHeader.() -> BpSessionHeader = {
+            copy(
+                mode = if (effective == BpMode.PRECISE) BpSessionHeader.MODE_PRECISE else BpSessionHeader.MODE_QUICK,
+                device = device,
+                appVersion = appVersion,
+                algorithm = ALGORITHM,
+                calibrationRound = capture?.round
+            )
+        }
+        val session = ActiveSession(id, log, header)
+        active = session
+        // Set before the job starts, so a second start() arriving at once (the screen's effect and
+        // the phone reopening it; seen in real logs 60–120 ms apart) is refused by the check above.
+        mutable.value = BpState.Preparing
+        job = viewModelScope.launch {
+            try {
+                record(session, effective, capture, startedAt)
+            } catch (e: CancellationException) {
+                // Left mid-measurement (screen off, back): what was recorded is kept, marked as such.
+                withContext(NonCancellable) { finishUnfinished(session, "cancelled") }
+                throw e
+            } catch (e: Exception) {
+                HLog.e(TAG, "BP session failed", e)
+                finishUnfinished(session, "error: ${e.javaClass.simpleName}: ${e.message}")
+                mutable.value = BpState.Failed(SensorProblem.NOT_SUPPORTED)
+            }
+        }
+    }
+
+    /** Saves a session that didn't reach its own end, with [reason], unless it was saved already. */
+    private suspend fun finishUnfinished(session: ActiveSession, reason: String) {
+        if (session.finished) return
+        HLog.i(TAG, "BP session ${session.id} ended early: $reason")
+        runCatching {
+            imu.stop()
+            imu.streams().all().forEach { session.log.attach(it) }
+        }
+        session.log.note("result", reason)
+        finish(session.log, session.header)
+    }
+
+    private suspend fun record(session: ActiveSession, effective: BpMode, capture: CaptureRequest?, startedAt: Long) {
+        val log = session.log
+        val header = session.header
+        val id = session.id
+        run {
+            log.event("aux.start")
+            val temp = aux.skinTemp()
+            temp?.let {
+                log.stream(BpSessionStreams.SKIN_TEMP, *BpSessionStreams.SKIN_TEMP_COLUMNS)
+                    .append(now() * 1_000_000L, it.objectC.toFloat(), (it.ambientC ?: Double.NaN).toFloat(), 0f)
+            }
+            val eda = aux.skinConductance(EDA_SECONDS)
+            eda?.let { log.stream(BpSessionStreams.EDA, *BpSessionStreams.EDA_COLUMNS).append(now() * 1_000_000L, it.toFloat()) }
+            log.capability("skinTemp", (temp != null).toString())
+            log.capability("eda", (eda != null).toString())
+            log.value(BpSessionStreams.VALUE_HEIGHT, heightCm())
+            imu.start()
+            log.event("recording.start", effective.name)
+            val recorded = if (effective == BpMode.PRECISE) recordPrecise(log) else recordQuick(log, capture)
+            val movement = imu.stop()
+            val streams = imu.streams()
+            streams.all().forEach { log.attach(it) }
+            log.event("recording.end")
+            log.value("motion.sdAll", movement)
+            val input = when (recorded) {
+                is Recorded.Failure -> {
+                    finish(log, header)
+                    mutable.value = recorded.state
+                    return
+                }
+                is Recorded.Session -> recorded.input.copy(
+                    imu = streams,
+                    skinTempC = temp?.objectC,
+                    edaMicroSiemens = eda,
+                    heightCm = heightCm(),
+                    recentEcg = recentRhythm(),
+                )
+            }
+            // Quick mode must be still; the precise maneuver moves the arm on purpose.
+            if (effective == BpMode.QUICK) {
+                val t = input.greenTimesNs
+                val still = if (t != null && t.size > minSeconds * input.fs) streams.motionSd(t[t.size - minSeconds * input.fs], t.last()) else movement
+                log.value("motion.sdWindow", still)
+                if (still != null && still > MotionMeter.MAX_STILL) {
+                    HLog.i(TAG, "BP: moved during recording (${"%.2f".format(still)} m/s²)")
+                    log.note("result", "moving")
+                    finish(log, header)
+                    mutable.value = BpState.Moving
+                    return
+                }
+            }
+            mutable.value = if (capture != null) {
+                finishCalibration(capture, input, log, id).also { finish(log, header) }
+            } else {
+                finishMeasurement(input, startedAt, log, id, header)
+            }
+        }
+    }
+
+    private sealed interface Recorded {
+        data class Session(val input: BpSessionInput) : Recorded
+
+        data class Failure(val state: BpState) : Recorded
+    }
+
+    /** Green / IR / red PPG until the pulse is steady (at least [minSeconds], at most [maxSeconds]). */
+    private suspend fun recordQuick(log: BpSessionRecorder, capture: CaptureRequest?): Recorded {
+        val fs = source.sampleRateHz
+        val profile = bpStore.calibration.value?.profile
+        val minimum = if (capture == null && profile?.atrialFibrillation == true) maxOf(minSeconds, profile.recordingSeconds) else minSeconds
+        val maximum = maxOf(maxSeconds, minimum)
+        val green = FloatList()
+        val ir = FloatList()
+        val times = LongList()
+        val ppgLog = log.stream(BpSessionStreams.PPG, *BpSessionStreams.PPG_COLUMNS)
+        val live = LivePpg(fs)
+        var lastUi = 0L
+        var lastCheck = 0
+        var stop = false
+        var failure: SensorProblem? = null
+        val startNs = now() * 1_000_000L
+        mutable.value = BpState.Measuring(0f, minimum, FloatArray(0), contact = true)
+        source.stream()
+            .catch { e -> failure = (e as? SensorException)?.problem ?: SensorProblem.NOT_SUPPORTED }
+            .takeWhile { !stop }
+            .collect { chunk ->
+                live.add(chunk.samples)
+                // Every point exactly as the SDK gave it goes to the log, contact or not.
+                if (chunk.points.isNotEmpty()) {
+                    chunk.points.forEach { p ->
+                        ppgLog.append(p.timestampMs * 1_000_000L, p.green, p.ir, p.red, p.greenStatus.toFloat(), p.irStatus.toFloat(), p.redStatus.toFloat())
+                    }
+                } else {
+                    chunk.samples.forEachIndexed { i, v ->
+                        ppgLog.append(startNs + (ppgLog.size + i).toLong() * 1_000_000_000L / fs, v, Float.NaN, Float.NaN, if (chunk.contact) 0f else 1f, -1f, -1f)
+                    }
+                }
+                if (chunk.contact) {
+                    val base = times.size
+                    // The samples are the points with a green value: their times, index by index.
+                    val sampled = chunk.points.filter { !it.green.isNaN() }
+                    chunk.samples.forEachIndexed { i, v ->
+                        green.add(v)
+                        ir.add(chunk.ir?.getOrNull(i) ?: Float.NaN)
+                        times.add(sampled.getOrNull(i)?.timestampMs?.times(1_000_000L) ?: (startNs + (base + i).toLong() * 1_000_000_000L / fs))
+                    }
+                }
+                val seconds = green.size / fs
+                if (seconds >= minimum && seconds >= lastCheck + CHECK_EVERY_SECONDS) {
+                    lastCheck = seconds
+                    val snapshot = green.toArray()
+                    stop = seconds >= maximum || withContext(Dispatchers.Default) { BpWindowSelector.shouldStop(snapshot, fs, minimum) }
+                    if (stop) log.event("stop", "after ${seconds}s")
+                }
+                val t = now()
+                if (t - lastUi >= uiIntervalMs) {
+                    lastUi = t
+                    val settling = seconds >= minimum
+                    mutable.value = BpState.Measuring(
+                        if (settling) 1f else green.size.toFloat() / (minimum * fs),
+                        if (settling) 0 else (minimum * fs - green.size + fs - 1) / fs,
+                        live.recent(3.0),
+                        chunk.contact,
+                        live.bpm(t),
+                        live.total,
+                        settling = settling,
+                    )
+                }
+            }
+        log.capability("ppg.ir", (ir.any { it.isFinite() }).toString())
+        failure?.let {
+            log.note("result", "failed $it")
+            return Recorded.Failure(BpState.Failed(it))
+        }
+        val irArray = ir.toArray().takeIf { a -> a.count { it.isFinite() } > a.size * 0.9 }
+        return Recorded.Session(BpSessionInput(green.toArray(), fs, times.toArray(), irArray))
+    }
+
+    /** ECG with its PPG (500 Hz) for [BpPhase.TOTAL_SECONDS] of finger contact, through the maneuver. */
+    private suspend fun recordPrecise(log: BpSessionRecorder): Recorded {
+        val source = ecg ?: return Recorded.Failure(BpState.Failed(SensorProblem.NOT_SUPPORTED))
+        val fs = source.sampleRateHz
+        val target = BpPhase.TOTAL_SECONDS * fs
+        val ecgValues = FloatList()
+        val ppgValues = FloatList()
+        val ecgLog = log.stream(BpSessionStreams.ECG, *BpSessionStreams.ECG_COLUMNS)
+        val live = LivePpg(fs)
+        var firstNs: Long? = null
+        var missingPpg = false
+        var lastUi = 0L
+        var phase: BpPhase? = null
+        var failure: SensorProblem? = null
+        mutable.value = BpState.Measuring(0f, BpPhase.TOTAL_SECONDS, FloatArray(0), contact = false, phase = BpPhase.REST)
+        source.stream()
+            .catch { e -> failure = (e as? SensorException)?.problem ?: SensorProblem.NOT_SUPPORTED }
+            .takeWhile { ecgValues.size < target }
+            .collect { chunk ->
+                val n = chunk.samples.size
+                val lastNs = (chunk.timestampMs ?: now()) * 1_000_000L
+                for (i in 0 until n) {
+                    val t = lastNs - (n - 1 - i).toLong() * 1_000_000_000L / fs
+                    ecgLog.append(t, chunk.samples[i], chunk.ppg?.getOrNull(i) ?: Float.NaN, if (chunk.leadOff) 1f else 0f)
+                }
+                if (chunk.leadOff || chunk.saturated) {
+                    // The recording must be one continuous stretch (its samples are timed from its
+                    // start, to line up with the motion sensors): losing the finger starts it again.
+                    if (ecgValues.size > 0) {
+                        log.event("contact.lost", "after ${ecgValues.size} samples; restarting")
+                        ecgValues.clear()
+                        ppgValues.clear()
+                        firstNs = null
+                        phase = null
+                    }
+                    mutable.value = BpState.Measuring(0f, BpPhase.TOTAL_SECONDS, live.recent(3.0), contact = false, phase = BpPhase.REST)
+                    return@collect
+                }
+                if (chunk.ppg == null) missingPpg = true
+                if (firstNs == null) firstNs = lastNs - (n - 1).toLong() * 1_000_000_000L / fs
+                val take = minOf(n, target - ecgValues.size)
+                for (i in 0 until take) {
+                    ecgValues.add(chunk.samples[i])
+                    ppgValues.add(chunk.ppg?.getOrNull(i) ?: Float.NaN)
+                }
+                chunk.ppg?.let { live.add(it.copyOf(take)) }
+                val seconds = ecgValues.size.toDouble() / fs
+                val current = BpPhase.at(seconds)
+                if (current != phase) {
+                    phase = current
+                    log.event("phase", current.name)
+                }
+                val t = now()
+                if (t - lastUi >= uiIntervalMs) {
+                    lastUi = t
+                    mutable.value = BpState.Measuring(
+                        ecgValues.size.toFloat() / target,
+                        (target - ecgValues.size + fs - 1) / fs,
+                        live.recent(3.0),
+                        !chunk.leadOff,
+                        live.bpm(t),
+                        live.total,
+                        phase = current,
+                    )
+                }
+            }
+        failure?.let {
+            log.note("result", "failed $it")
+            return Recorded.Failure(BpState.Failed(it))
+        }
+        log.capability("ecg.ppg", (!missingPpg).toString())
+        val start = firstNs
+        if (ecgValues.size < BpWindowSelector.WINDOW_SECONDS * fs / 2 || start == null || missingPpg) {
+            log.note("result", "precise: ${ecgValues.size} samples, ppg ${!missingPpg}")
+            return Recorded.Failure(BpState.PoorSignal)
+        }
+        val ppg = ppgValues.toArray()
+        // The raised window from the arm's actual angle; the scheduled phase if the motion sensor didn't see it.
+        val raised = imu.streams().raisedWindow() ?: (start + BpPhase.RAISE.untilSeconds * 1_000_000_000L - 3_000_000_000L)..(start + BpPhase.HOLD_UP.untilSeconds * 1_000_000_000L)
+        log.note(BpSessionStreams.NOTE_RAISED_FROM, raised.first.toString())
+        log.note(BpSessionStreams.NOTE_RAISED_TO, raised.last.toString())
+        val times = LongArray(ppg.size) { start + it.toLong() * 1_000_000_000L / fs }
+        return Recorded.Session(BpSessionInput(ppg, fs, times, precise = PreciseInput(ecgValues.toArray(), ppg, fs, start, raised)))
+    }
+
+    private suspend fun finishCalibration(capture: CaptureRequest, input: BpSessionInput, log: BpSessionRecorder, sessionId: String): BpState {
+        val channels = withContext(Dispatchers.Default) { BpPipeline.capture(input) }
+        log.features("green", channels?.features)
+        log.features("ir", channels?.irFeatures)
+        log.value("bcg.pttMs", channels?.bcgPttMs)
+        log.value("precise.patMs", channels?.patMs)
+        log.value("precise.pepMs", channels?.pepMs)
+        log.value("precise.pttMs", channels?.pttMs)
+        // A summary: the raw waves are in the session log (a whole capture made 4 000-character lines).
+        HLog.i(
+            TAG,
+            "BP calibration round ${capture.round}: green=${channels?.features?.let { summary(it) }} ir=${channels?.irFeatures?.let { summary(it) }} " +
+                "bcgPttMs=${channels?.bcgPttMs} patMs=${channels?.patMs} fs=${channels?.fs}",
+        )
+        val features = channels?.features
+        if (channels == null || features == null || features.quality < BpEstimator.MIN_QUALITY || features.beats < BpEstimator.MIN_BEATS) {
+            log.note("result", "poor signal")
+            return BpState.PoorSignal
+        }
+        // A calibration round is the reference for everything after it: it must be steady and clean.
+        if (!calibrationGrade(features)) {
+            HLog.i(TAG, "BP calibration round ${capture.round} taken again: not steady (${summary(features)})")
+            log.note("result", "calibration round not steady: quality=${features.quality} beats=${features.beats} hrSlope=${features.hrSlopeBpmPerS} amplitudeTrend=${features.amplitudeTrend}")
+            return BpState.CalibrationRetry(capture.round)
+        }
+        val result = CaptureResult(
+            UUID.randomUUID().toString(),
+            capture.captureId,
+            capture.round,
+            features,
+            channels.ppg.takeIf { channels.fs == BpCalibration.PPG_FS },
+            channels.gravity,
+            channels,
+            sessionId,
+        )
+        records.enqueueMessage(result.id, Protocol.BP_CALIBRATION_CAPTURE, Protocol.json.encodeToString(result).encodeToByteArray())
+        sync.schedule()
+        bpStore.setPendingCapture(null)
+        log.note("result", "calibration round ${capture.round}")
+        return BpState.CalibrationRecorded(capture.round)
+    }
+
+    private suspend fun finishMeasurement(
+        input: BpSessionInput,
+        startedAt: Long,
+        log: BpSessionRecorder,
+        sessionId: String,
+        header: BpSessionHeader.() -> BpSessionHeader,
+    ): BpState {
+        val result = withContext(Dispatchers.Default) { BpPipeline.run(bpStore.calibration.value, input, now(), bpStore.history, log) }
+        val outcome = result.outcome
+        HLog.i(TAG, "BP measurement: samples=${input.green.size} outcome=$outcome")
+        return when (outcome) {
+            BpOutcome.NeedsCalibration -> BpState.NeedsCalibration.also { finish(log, header) }
+            BpOutcome.PoorSignal -> BpState.PoorSignal.also { finish(log, header) }
+            is BpOutcome.OutOfRange -> BpState.OutOfRange.also { finish(log, header) }
+            is BpOutcome.Ok -> {
+                val e = outcome.estimate
+                val t = now()
+                val previous = bpStore.lastReading
+                val confirmed = previous != null && BpConfirmation.confirms(previous.toEstimate(), previous.atMs, e, t)
+                bpStore.lastReading = LastBpReading.of(e, t)
+                val features = result.features
+                if (!e.beyondCalibration && e.state.steady && features != null) bpStore.addHistory(features)
+                val window = result.window ?: input.green.indices
+                val wave = input.green.copyOfRange(window.first, window.last + 1)
+                val recordId = UUID.randomUUID().toString()
+                val meta = RecordMeta(
+                    recordId,
+                    RecordKind.BLOOD_PRESSURE,
+                    startedAt,
+                    (t - startedAt).coerceAtLeast(0),
+                    input.fs,
+                    wave.size,
+                    RecordSummary.BloodPressure(
+                        e.systolic,
+                        e.diastolic,
+                        e.pulse,
+                        e.uncertaintySys,
+                        algorithm = ALGORITHM,
+                        beyondCalibration = e.beyondCalibration,
+                        confirmed = confirmed,
+                        channels = e.channels.joinToString(",") { it.channel.name },
+                        bodyState = e.state.state.name,
+                        rangeOnly = e.wideRange,
+                        mode = if (input.precise != null) BpSessionHeader.MODE_PRECISE else BpSessionHeader.MODE_QUICK,
+                        sessionId = sessionId,
+                    ),
+                )
+                // The raw pulse wave goes to the phone too: it lets the phone's personal model refine
+                // the reading and lets the algorithm be re-evaluated on real data later.
+                records.add(meta, wave)
+                finish(log) { header().copy(recordId = recordId) }
+                BpState.Done(
+                    e.systolic,
+                    e.diastolic,
+                    e.pulse,
+                    BpCategory.of(e.systolic, e.diastolic),
+                    e.uncertaintySys,
+                    e.beyondCalibration,
+                    confirmed,
+                    e.safety,
+                    uncertaintyDia = e.uncertaintyDia,
+                    notValidated = e.notValidated,
+                    ectopicBeats = e.ectopicBeats,
+                    bodyState = e.state.state,
+                    channels = e.channels.map { it.channel },
+                    postureDiffers = e.postureDiffers,
+                    wideRange = e.wideRange,
+                )
+            }
+        }
+    }
+
+    /** The rhythm of the latest ECG in the last 30 days (the app's ECG AI result), as a prior. */
+    private suspend fun recentRhythm(): RecentRhythm? = runCatching {
+        val since = now() - RECENT_ECG_MS
+        records.history.first().firstOrNull { it.kind == RecordKind.ECG && it.startedAtMs >= since }
+            ?.let { (it.summary as? RecordSummary.Ecg)?.result }
+            ?.let {
+                when (it) {
+                    EcgResult.AFIB_SIGNS -> RecentRhythm.AF
+                    EcgResult.SINUS_RHYTHM -> RecentRhythm.SINUS
+                    else -> null
+                }
+            }
+    }.getOrNull()
+
+    /** Stores the raw session log for the phone (every session, including failed ones). */
+    private suspend fun finish(log: BpSessionRecorder, header: BpSessionHeader.() -> BpSessionHeader) {
+        val session = log.build(header)
+        HLog.i(RAW_TAG, "session ${session.header.id}: ${session.streams.joinToString { "${it.name}=${it.size}@${"%.1f".format(it.rateHz())}Hz" }} values=${session.header.values.size}")
+        session.header.values.entries.sortedBy { it.key }.chunked(12).forEach { chunk -> HLog.d(RAW_TAG, chunk.joinToString { "${it.key}=${"%.4g".format(it.value)}" }) }
+        // The words too (state, window, why a calibration can't be used, the calibration's cuff values, the result).
+        session.header.notes.entries.sortedBy { it.key }.forEach { (k, v) -> HLog.d(RAW_TAG, "note $k=$v") }
+        session.header.events.forEach { e -> HLog.d(RAW_TAG, "event +${e.tMs}ms ${e.type}${if (e.detail.isEmpty()) "" else " ${e.detail}"}") }
+        runCatching { records.addSession(session) }.onFailure { HLog.w(RAW_TAG, "session not stored", it) }
+        active?.takeIf { it.id == session.header.id }?.finished = true
+        RawCapture.end(rawId, notes = mapOf("bpSession" to session.header.id, "result" to (session.header.notes["result"] ?: "")))
+        RawCapture.saveBpSession(session)
+        sync.schedule()
+    }
+
+    private fun summary(f: PpgFeatureVector) =
+        "hr=${"%.1f".format(f.heartRateBpm)} q=${"%.2f".format(f.quality)} beats=${f.beats} inverted=${f.inverted} " +
+            "upstroke=${f.upstrokeMs} width50=${f.width50Ms} area=${"%.2f".format(f.areaRatio)} " +
+            "hrSlope=${"%.2f".format(f.hrSlopeBpmPerS)} ampTrend=${"%.2f".format(f.amplitudeTrend)}"
+
+    fun cancel() {
+        if (job?.isActive == true) imu.stop()
+        job?.cancel()
+        mutable.value = BpState.Idle
+    }
+
+    /** The screen is gone for good: nothing may keep listening to the sensors. */
+    override fun onCleared() {
+        if (job?.isActive == true) cancel()
+        imu.stop()
+        super.onCleared()
+    }
+
+    fun reset() {
+        mutable.value = BpState.Idle
+    }
+
+    /** Growable primitive lists (a 60 s recording at 100 Hz, or 34 s at 500 Hz). */
+    private class FloatList {
+        private var a = FloatArray(4096)
+        var size = 0
+            private set
+
+        fun add(v: Float) {
+            if (size == a.size) a = a.copyOf(size * 2)
+            a[size++] = v
+        }
+
+        fun any(p: (Float) -> Boolean) = (0 until size).any { p(a[it]) }
+
+        fun clear() {
+            size = 0
+        }
+
+        fun toArray() = a.copyOf(size)
+    }
+
+    private class LongList {
+        private var a = LongArray(4096)
+        var size = 0
+            private set
+
+        fun add(v: Long) {
+            if (size == a.size) a = a.copyOf(size * 2)
+            a[size++] = v
+        }
+
+        fun toArray() = a.copyOf(size)
+    }
+
+    /** Band-passed PPG, flipped upright when the raw signal is inverted, and a live pulse. */
+    private class LivePpg(private val fs: Int) {
+        private val filter = StreamingPpgFilter(fs)
+        private val ring = FloatArray(fs * 8)
+        var total = 0L
+            private set
+        private var inverted: Boolean? = null
+        private var lastBpmAt = 0L
+        private var bpm: Int? = null
+
+        fun add(samples: FloatArray) {
+            filter.process(samples).forEach {
+                ring[(total % ring.size).toInt()] = it
+                total++
+            }
+            // Decide the polarity once there's enough signal; raw watch PPG is usually upside down.
+            if (inverted == null && total >= fs * 4) inverted = PpgFeatures.isInverted(raw(4.0))
+        }
+
+        private fun raw(seconds: Double): FloatArray {
+            val n = (seconds * fs).toInt().coerceAtMost(minOf(total, ring.size.toLong()).toInt())
+            return FloatArray(n) { k -> ring[((total - n + k) % ring.size).toInt()] }
+        }
+
+        fun recent(seconds: Double): FloatArray = raw(seconds).let { x -> if (inverted == true) FloatArray(x.size) { -x[it] } else x }
+
+        fun bpm(nowMs: Long): Int? {
+            if (nowMs - lastBpmAt >= 1_000) {
+                lastBpmAt = nowMs
+                bpm = PulseRate.bpm(recent(6.0), fs) ?: bpm
+            }
+            return bpm
+        }
+    }
+
+    private companion object {
+        const val TAG = "Heartline/BP"
+        const val RAW_TAG = "Heartline/BpRaw"
+        const val ALGORITHM = 6
+        const val CHECK_EVERY_SECONDS = 2
+        const val EDA_SECONDS = 5
+        const val RECENT_ECG_MS = 30 * 24 * 3_600_000L
+
+        /** A calibration round must be steady and clean (a real round with a rising pulse and a
+         * changing amplitude skewed a whole calibration). */
+        fun calibrationGrade(f: com.heartline.shared.bp.PpgFeatureVector) =
+            f.quality >= 0.7 &&
+                f.beats >= 15 &&
+                kotlin.math.abs(f.hrSlopeBpmPerS) <= com.heartline.shared.bp.HemodynamicStateClassifier.TRANSIENT_HR_SLOPE &&
+                kotlin.math.abs(f.amplitudeTrend) <= com.heartline.shared.bp.HemodynamicStateClassifier.TRANSIENT_AMPLITUDE
+    }
+}

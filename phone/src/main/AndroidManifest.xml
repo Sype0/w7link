@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- In-app updates from GitHub releases (removed from the Google Play build, see src/play/). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The update download keeps going after leaving the app (WorkManager's foreground job). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- "Share with AI": which assistant apps are installed and accept shares (package visibility). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="ai.x.grok" />
+    </queries>
+
+    <application
+        android:name=".PhoneApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- heartline://phone/<route>: opened from the watch (RemoteActivityHelper) and notifications. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="phone"
+                    android:scheme="heartline" />
+            </intent-filter>
+            <!-- Long-press on a Heartline Quick Settings tile opens its settings. -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.reports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <service
+            android:name=".sync.PhoneSyncService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/hl/v1"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
+
+        <!-- Home-screen widgets (Jetpack Glance). -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/widget_style_title"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <receiver
+            android:name=".widget.DashboardWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_dashboard">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_dashboard_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.HeartRateWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_heart_rate">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_heart_rate_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.EcgWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_ecg">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_ecg_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.BpWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_bp">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_bp_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.StressWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_stress">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_stress_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.QuickMeasureWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_quick">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.HeartDayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_heart_day">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_heart_day_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MetricTileSmallReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_metric_tile_small">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_metric_tile_small_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MetricTileSlimReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_metric_tile_slim">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_metric_tile_slim_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MetricTileReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_metric_tile">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_metric_tile_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.MeasureButtonReceiver"
+            android:exported="true"
+            android:label="@string/widget_name_measure">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_measure_info" />
+        </receiver>
+        <!-- Quick Settings tiles: one tap starts a measurement on the watch. -->
+        <service
+            android:name=".qs.EcgQsTile"
+            android:exported="true"
+            android:icon="@drawable/ic_metric_ecg"
+            android:label="@string/qs_name_ecg"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+        <service
+            android:name=".qs.BpQsTile"
+            android:exported="true"
+            android:icon="@drawable/ic_metric_bp"
+            android:label="@string/qs_name_bp"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+        <service
+            android:name=".qs.MeasureQsTile"
+            android:exported="true"
+            android:icon="@drawable/ic_metric_spo2"
+            android:label="@string/qs_name_measure"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
+        <!-- The update download runs as a data-sync foreground job (Android 14 needs the type). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+    </application>
+</manifest>

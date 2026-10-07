@@ -1,0 +1,312 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Selin and Heartline contributors
+
+package com.heartline.wear.ecg
+
+import com.heartline.datalayer.diag.HLog
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.heartline.shared.dsp.StreamingEcgFilter
+import com.heartline.shared.ecg.EcgAnalyzer
+import com.heartline.shared.bp.PulseArrival
+import com.heartline.shared.ecg.ContactPhase
+import com.heartline.shared.ecg.EcgRecorder
+import com.heartline.shared.ecg.EcgSession
+import com.heartline.shared.ecg.RPeakDetector
+import com.heartline.shared.model.EcgMetrics
+import com.heartline.shared.model.EcgResult
+import com.heartline.shared.model.RecordKind
+import com.heartline.shared.model.RecordMeta
+import com.heartline.shared.model.RecordSummary
+import com.heartline.wear.data.WatchRecordStore
+import com.heartline.wear.sensor.EcgSource
+import com.heartline.wear.sensor.SensorException
+import com.heartline.wear.sensor.SensorProblem
+import com.heartline.wear.sensor.SyncScheduler
+import com.heartline.wear.diag.RawCapture
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
+
+sealed interface EcgMeasureState {
+    data object Idle : EcgMeasureState
+
+    /**
+     * [trace]: the last seconds of the filtered live signal (shown from the moment measuring starts,
+     * even before the finger touches). [bpm]: live heart rate once a few seconds are recorded.
+     */
+    data class Measuring(
+        val progress: Float,
+        val secondsLeft: Int,
+        val trace: FloatArray,
+        val leadOff: Boolean,
+        val waitingForTouch: Boolean = false,
+        val bpm: Int? = null,
+        /** Contact reported; the signal is settling and being checked before the countdown starts. */
+        val arming: Boolean = false,
+        /** Contact reported for a while but the signal still isn't a clean ECG: ask for a lighter, steadier touch. */
+        val struggling: Boolean = false,
+        /** Counting has started at least once (for the start haptic). */
+        val started: Boolean = false,
+        /** Total live samples so far: positions the sweep's write head. */
+        val endIndex: Long = trace.size.toLong(),
+    ) : EcgMeasureState
+
+    data object Analyzing : EcgMeasureState
+
+    data class Done(val id: String, val result: EcgResult, val averageBpm: Int?, val metrics: EcgMetrics? = null) : EcgMeasureState
+
+    data class Failed(val problem: SensorProblem) : EcgMeasureState
+}
+
+/**
+ * Runs one 30-second ECG: streams from [source] into an [EcgRecorder] (and a causal filter for the
+ * live strip), analyses the recording, stores it — poor ones too, so they can be reviewed — and
+ * schedules delivery to the phone.
+ */
+class EcgMeasureViewModel(
+    private val source: EcgSource,
+    private val store: WatchRecordStore,
+    private val sync: SyncScheduler,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val uiIntervalMs: Long = 40,
+    /** Every finished recording's result and time (the rhythm notifications learn from it). */
+    private val onResult: (EcgResult, Long) -> Unit = { _, _ -> },
+) : ViewModel() {
+    private val mutable = MutableStateFlow<EcgMeasureState>(EcgMeasureState.Idle)
+    val state: StateFlow<EcgMeasureState> = mutable.asStateFlow()
+    private var job: Job? = null
+
+    fun start() {
+        if (job?.isActive == true) return
+        val fs = source.sampleRateHz
+        val recorder = EcgRecorder(fs)
+        val live = LiveStrip(fs)
+        val rate = RateMeter()
+        val startedAt = now()
+        val paired = PairedPpg(fs * recorder.targetSeconds)
+        HLog.i(REC_TAG, "start: phase=${recorder.phase} target=${recorder.targetSeconds}s fs=$fs")
+        mutable.value = EcgMeasureState.Measuring(0f, recorder.secondsLeft, FloatArray(0), leadOff = true, waitingForTouch = true)
+        val raw = RawCapture.begin("ecg", mapOf("fs" to "$fs", "targetSeconds" to "${recorder.targetSeconds}"))
+        job = viewModelScope.launch {
+            try {
+                measure(recorder, live, rate, paired, startedAt)
+            } finally {
+                // Every sample of every sensor in this ECG, whatever the outcome (cancelled too).
+                RawCapture.end(raw, notes = mapOf("result" to mutable.value.toString().take(4000)))
+            }
+        }
+    }
+
+    private suspend fun measure(recorder: EcgRecorder, live: LiveStrip, rate: RateMeter, paired: PairedPpg, startedAt: Long) {
+        val fs = source.sampleRateHz
+        var lastUi = 0L
+        var lastBpmAt = 0L
+        var bpm: Int? = null
+        var lastPhase = recorder.phase
+        var lastCheckLog = 0L
+        run {
+            var failure: SensorProblem? = null
+            source.stream()
+                .catch { e -> failure = (e as? SensorException)?.problem ?: SensorProblem.NOT_SUPPORTED }
+                .takeWhile { !recorder.isComplete && !recorder.isAbandoned }
+                .collect { chunk ->
+                    recorder.accept(chunk.samples, chunk.leadOff, chunk.saturated)
+                    logRecorder(recorder, lastPhase, now() - startedAt, now() - lastCheckLog >= 1_000)?.let { lastCheckLog = it }
+                    lastPhase = recorder.phase
+                    val counting = recorder.phase == ContactPhase.RECORDING
+                    if (counting) paired.add(chunk.samples, chunk.ppg)
+                    live.add(chunk.samples, chunk.leadOff)
+                    rate.add(chunk.samples.size, chunk.leadOff, chunk.timestampMs)
+                    val t = now()
+                    if (counting && t - lastBpmAt >= 1_000 && recorder.progress * recorder.targetSeconds >= 4) {
+                        lastBpmAt = t
+                        bpm = liveBpm(live.recent(6.0), fs)
+                    }
+                    if (!counting) bpm = null
+                    if (t - lastUi >= uiIntervalMs || recorder.isComplete) {
+                        lastUi = t
+                        mutable.value = EcgMeasureState.Measuring(
+                            recorder.progress,
+                            recorder.secondsLeft,
+                            live.recent(3.0),
+                            recorder.leadOff,
+                            waitingForTouch = recorder.phase == ContactPhase.WAITING,
+                            bpm = bpm,
+                            endIndex = live.total,
+                            arming = recorder.phase == ContactPhase.ARMING,
+                            struggling = recorder.isStruggling,
+                            started = recorder.segmentStarts.isNotEmpty(),
+                        )
+                    }
+                }
+            failure?.let {
+                HLog.w(TAG, "ECG failed: $it")
+                RawCapture.event("failed", it.name)
+                mutable.value = EcgMeasureState.Failed(it)
+                return
+            }
+            mutable.value = EcgMeasureState.Analyzing
+            mutable.value = finish(recorder, startedAt, rate.hz(), paired)
+        }
+    }
+
+    /** Phase changes, and once a second while arming why the signal isn't accepted yet. @return time logged, if the check was. */
+    private fun logRecorder(recorder: EcgRecorder, before: ContactPhase, elapsedMs: Long, checkDue: Boolean): Long? {
+        if (recorder.phase != before) {
+            HLog.i(
+                REC_TAG,
+                "t=${elapsedMs}ms phase $before -> ${recorder.phase} collected=${"%.1f".format(recorder.progress * recorder.targetSeconds)}s " +
+                    "segments=${recorder.segmentStarts.size} leadOffSeconds=${"%.1f".format(recorder.leadOffSeconds)}",
+            )
+        }
+        if (recorder.phase != ContactPhase.ARMING || !checkDue) return null
+        val c = recorder.lastCheck
+        HLog.i(
+            REC_TAG,
+            "t=${elapsedMs}ms arming ${"%.1f".format(recorder.armedSeconds)}s check=" +
+                (c?.let { "${it.rejected ?: "OK"} lenient=${it.lenient} p2p=${it.p2pMv?.let { v -> "%.3f".format(v) }}mV kurtosis=${it.kurtosis?.let { v -> "%.2f".format(v) }} beats=${it.peaks} rr=${it.rrMs} heightRatio=${it.heightRatio?.let { v -> "%.2f".format(v) }}" } ?: "not yet (settling / filling 3 s)"),
+        )
+        return now()
+    }
+
+    fun cancel() {
+        job?.cancel()
+        mutable.value = EcgMeasureState.Idle
+    }
+
+    fun reset() {
+        mutable.value = EcgMeasureState.Idle
+    }
+
+    private suspend fun finish(recorder: EcgRecorder, startedAt: Long, measuredHz: Float?, paired: PairedPpg? = null): EcgMeasureState {
+        val recording = recorder.recording()
+        val endedAt = now()
+        val session = EcgSession(
+            startedAtMs = startedAt,
+            endedAtMs = endedAt,
+            leadOffSec = recorder.leadOffSeconds,
+            leadOffRatio = recorder.leadOffRatio,
+            measuredRateHz = measuredHz,
+            segmentStarts = recorder.segmentStarts,
+        )
+        val analysis = withContext(Dispatchers.Default) { EcgAnalyzer.analyze(recording, recorder.sampleRateHz, session) }
+        val pat = paired?.takeIf { it.usable }?.let { p -> withContext(Dispatchers.Default) { PulseArrival.compute(p.ecg(), p.ppg(), recorder.sampleRateHz) } }
+        HLog.i(TAG, "PAT: ppg=${paired?.usable} samples=${paired?.size} result=$pat")
+        val m = analysis.metrics.copy(pulseArrivalMs = pat?.medianMs, pulseArrivalBeats = pat?.beats)
+        HLog.i(
+            TAG,
+            "ECG done: result=${analysis.result} reason=${m.poorReason} quality=${m.qualityScore} " +
+                "duration=${m.durationSec}s usable=${m.usableSec}s motion=${m.motionSec}s muscle=${m.muscleNoiseSec}s " +
+                "leadOff=${m.leadOffSec}s beats=${m.beats} hr=${m.averageBpm} (${m.minBpm}-${m.maxBpm}) rmssd=${m.rmssdMs} " +
+                "pWave=${analysis.evidence.pWaveRatio} inverted=${m.inverted} rate=${m.sampleRateHz}Hz " +
+                "raw[min=${recording.minOrNull()} max=${recording.maxOrNull()} mean=${recording.average()}] noisy=${m.noisySeconds}",
+        )
+        val id = UUID.randomUUID().toString()
+        val meta = RecordMeta(
+            id = id,
+            kind = RecordKind.ECG,
+            startedAtMs = startedAt,
+            durationMs = recording.size * 1000L / recorder.sampleRateHz,
+            sampleRateHz = recorder.sampleRateHz,
+            sampleCount = recording.size,
+            summary = RecordSummary.Ecg(analysis.averageBpm, analysis.result, recorder.leadOffRatio, metrics = m),
+        )
+        // Every recording worth looking at is kept (poor ones too, for review and tuning);
+        // only a few seconds of signal from an abandoned attempt are dropped.
+        if (recording.size >= MIN_STORED_SEC * recorder.sampleRateHz) {
+            store.add(meta, recording)
+            sync.schedule()
+        }
+        onResult(analysis.result, now())
+        return EcgMeasureState.Done(id, analysis.result, analysis.averageBpm, m)
+    }
+
+    /** ECG and the PPG channel reported with it, kept sample-aligned (contact stretches only). */
+    private class PairedPpg(private val capacity: Int) {
+        private val ecg = FloatArray(capacity)
+        private val ppg = FloatArray(capacity)
+        var size = 0
+            private set
+        private var missing = false
+
+        val usable get() = !missing && size > 0
+
+        fun add(samples: FloatArray, values: FloatArray?) {
+            if (values == null || values.size != samples.size) {
+                missing = true
+                return
+            }
+            val n = minOf(samples.size, capacity - size)
+            samples.copyInto(ecg, size, 0, n)
+            values.copyInto(ppg, size, 0, n)
+            size += n
+        }
+
+        fun ecg() = ecg.copyOf(size)
+
+        fun ppg() = ppg.copyOf(size)
+    }
+
+    private fun liveBpm(recent: FloatArray, fs: Int): Int? {
+        if (recent.size < fs * 3) return null
+        return RPeakDetector.heartRateBpm(RPeakDetector.detect(recent, fs), fs)?.takeIf { it in 30..220 }
+    }
+
+    /** Filtered live signal, including before the first touch (flat while there's no contact). */
+    private class LiveStrip(private val fs: Int) {
+        private val filter = StreamingEcgFilter(fs)
+        private val ring = FloatArray(fs * 8)
+        private var count = 0L
+        private var wasLeadOff = true
+
+        val total: Long get() = count
+
+        fun add(samples: FloatArray, leadOff: Boolean) {
+            if (!leadOff && wasLeadOff) filter.reset()
+            wasLeadOff = leadOff
+            val values = if (leadOff) FloatArray(samples.size) else filter.process(samples)
+            values.forEach {
+                ring[(count % ring.size).toInt()] = it
+                count++
+            }
+        }
+
+        fun recent(seconds: Double): FloatArray {
+            val n = (seconds * fs).toInt().coerceAtMost(minOf(count, ring.size.toLong()).toInt())
+            return FloatArray(n) { k -> ring[((count - n + k) % ring.size).toInt()] }
+        }
+    }
+
+    /** Real sample rate from sensor timestamps over contact time (the SDK promises 500 Hz). */
+    private class RateMeter {
+        private var samples = 0L
+        private var elapsedMs = 0L
+        private var lastTs: Long? = null
+
+        fun add(n: Int, leadOff: Boolean, ts: Long?) {
+            val previous = lastTs
+            if (!leadOff && ts != null && previous != null && ts > previous && ts - previous < 500) {
+                samples += n
+                elapsedMs += ts - previous
+            }
+            lastTs = if (leadOff) null else ts
+        }
+
+        fun hz(): Float? = if (elapsedMs < 2_000) null else samples * 1000f / elapsedMs
+    }
+
+    private companion object {
+        const val REC_TAG = "Heartline/EcgRec"
+
+        const val TAG = "Heartline/ECG"
+        const val MIN_STORED_SEC = 10
+    }
+}

@@ -1,0 +1,416 @@
+name: Build
+run-name: "Build ${{ inputs.version }} · ${{ inputs.channel }} · ${{ inputs.branch || inputs.ref || github.ref_name }}"
+
+# Runs from the form (Actions → Build → Run workflow) or from the Promote workflow, never on every commit.
+#
+# Channels:
+#   stable  release build for everyone: tag vX.Y.Z, the "latest" GitHub release
+#   beta    release build for testers: tag vX.Y.Z-beta.N, a pre-release; offered on the Beta and
+#           Development update channels
+#   dev     the newest code for early testers: tag vX.Y.Z-dev.<run>, a pre-release offered only on
+#           the Development channel
+# All three are the same release build (only the version differs), signed with the same release
+# key, with a versionCode that counts up with time, so users can move between channels freely.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to build (or a tag / commit SHA)"
+        required: true
+        default: main
+        type: string
+      version:
+        description: "Version (X.Y.Z). The channel adds -beta.N or -dev.N"
+        required: true
+        type: string
+      channel:
+        description: "Release type: stable = main release for everyone · beta = Beta and Development channels · dev = newest code, Development channel only"
+        required: true
+        default: beta
+        type: choice
+        options: [beta, stable, dev]
+      release:
+        description: "Release: publish = released now · draft = saved as a draft, published later on GitHub · off = APKs only as run artifacts"
+        required: false
+        default: publish
+        type: choice
+        options: [publish, draft, "off"]
+      telegram:
+        description: "Announce the release in the Telegram group (any channel, dev too; for a draft, when it's published)"
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        description: "Run lint and tests before building"
+        required: false
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      channel:
+        required: true
+        type: string
+      release:
+        description: "publish, draft or off"
+        required: false
+        default: publish
+        type: string
+      telegram:
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        required: false
+        default: true
+        type: boolean
+      ref:
+        description: "Commit or tag to build (Promote builds the tested beta's commit)"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: build-${{ inputs.branch || inputs.ref }}-${{ inputs.version }}-${{ inputs.channel }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    # bash -eo pipefail: a failing command inside a pipe (e.g. `… | tee`) stops the build.
+    shell: bash
+
+jobs:
+  # A re-run of a build whose release is already published only announces it again (a draft:
+  # nothing, it's announced when published): every release text carries the run id, so this
+  # finds the release this run made, if any.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.find.outputs.tag }}
+      url: ${{ steps.find.outputs.url }}
+      draft: ${{ steps.find.outputs.draft }}
+    steps:
+      - name: Release already published by this run?
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MARKER: "heartline-run: ${{ github.run_id }} "
+        run: |
+          found=$(gh api "repos/${{ github.repository }}/releases?per_page=50" \
+            --jq '.[] | select((.body // "") | contains(env.MARKER)) | [.tag_name, .html_url, .draft] | @tsv' | head -n1)
+          if [ -n "$found" ]; then
+            tag=$(cut -f1 <<<"$found"); url=$(cut -f2 <<<"$found"); draft=$(cut -f3 <<<"$found")
+            if [ "$draft" = true ]; then
+              echo "::notice::Run ${{ github.run_id }} already saved $tag as a draft: nothing is rebuilt. Publish it on GitHub → Releases; that announces it."
+            else
+              echo "::notice::Re-run of a published release ($tag): announcing it again, nothing is rebuilt."
+            fi
+            { echo "tag=$tag"; echo "url=$url"; echo "draft=$draft"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "No release from run ${{ github.run_id }} yet: full build."
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.tag == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      tag: v${{ steps.version.outputs.version }}
+      url: ${{ steps.release.outputs.url }}
+    env:
+      CHANNEL: ${{ inputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Build summary
+        env:
+          SOURCE: ${{ inputs.branch || inputs.ref || github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          echo "Building '$SOURCE' at $(git rev-parse --short HEAD) as $CHANNEL"
+          if [ "$CHANNEL" = stable ] && [ "$SOURCE" != "$DEFAULT_BRANCH" ] && [ "${SOURCE#v}" = "$SOURCE" ]; then
+            echo "::warning::A stable release is being built from '$SOURCE', not from $DEFAULT_BRANCH."
+          fi
+          {
+            echo "### Heartline build"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Source | \`$SOURCE\` ($(git rev-parse --short HEAD)) |"
+            echo "| Channel | $CHANNEL |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit being built
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The release tools from the default branch also build an older commit (Promote builds the
+      # beta's commit), so every build gets the current version rules, notes and checks.
+      - name: Release tools
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          for f in tools/release/release.py tools/ci/check-apks.py; do
+            git show "origin/$DEFAULT_BRANCH:$f" > "$RUNNER_TEMP/tools/$(basename "$f")" 2>/dev/null || cp "$f" "$RUNNER_TEMP/tools/"
+          done
+          echo "RELEASE_PY=$RUNNER_TEMP/tools/release.py" >> "$GITHUB_ENV"
+
+      - name: Work out the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Draft releases have no git tag yet, so their versions come from the releases list.
+          gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate --jq '.[].tag_name' > "$RUNNER_TEMP/release-tags.txt"
+          out=$(python3 "$RELEASE_PY" version --base "${{ inputs.version }}" --channel "$CHANNEL" --run "${{ github.run_number }}" --known-tags "$RUNNER_TEMP/release-tags.txt")
+          # A commit from before the time-based versionCode (Promote builds the beta's commit) prints
+          # no code: the same formula, minutes since 2026-01-01 UTC.
+          grep -q '^code=' <<<"$out" || out+=$'\n'"code=$(( ($(date +%s) - 1767225600) / 60 ))"
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+          version=$(echo "$out" | sed -n 's/^version=//p')
+          if [ -z "$version" ]; then
+            echo "::error::Could not work out the version from '${{ inputs.version }}'"
+            exit 1
+          fi
+          echo "| Version | \`$version\` (tag \`v$version\`), versionCode $(echo "$out" | sed -n 's/^code=//p') |" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Every build (stable, beta and dev) is signed with the release key: add the RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD secrets (docs/RELEASING.md)."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          {
+            echo "HEARTLINE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks"
+            echo "HEARTLINE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "HEARTLINE_KEY_ALIAS=$KEY_ALIAS"
+            echo "HEARTLINE_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          } >> "$GITHUB_ENV"
+
+      - name: Lint and license headers
+        if: inputs.run_tests
+        run: |
+          ./gradlew --console=plain ktlintCheck
+          python3 tools/ci/license-headers.py
+          python3 tools/ci/check-logging.py
+
+      - name: Unit, Robolectric and Paparazzi tests
+        if: inputs.run_tests
+        run: ./gradlew --console=plain test verifyPaparazziDebug
+
+      # Written before the build so the notes are inside the APK ("What's new" after updating).
+      - name: Release notes (OpenCode Go)
+        # The model can take several minutes for many commits (streamed, retried once).
+        timeout-minutes: 35
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+        run: |
+          python3 "$RELEASE_PY" notes \
+            --version "${{ steps.version.outputs.version }}" \
+            --previous "${{ steps.version.outputs.previous }}" \
+            --out "$RUNNER_TEMP/notes.md" \
+            --changelog CHANGELOG.md
+
+      # Every channel is the same release build; only the version name and code differ.
+      - name: Assemble APKs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./gradlew --console=plain :phone:assembleRelease :wear:assembleRelease \
+            -Pheartline.versionName="$VERSION" \
+            -Pheartline.versionCode="${{ steps.version.outputs.code }}"
+          mkdir -p dist
+          cp phone/build/outputs/apk/release/*.apk "dist/Heartline-phone-$VERSION.apk"
+          cp wear/build/outputs/apk/release/*.apk "dist/Heartline-watch-$VERSION.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS)
+          ls -l dist && cat dist/SHA256SUMS
+
+      # Stops the build before anything is published if the APKs wouldn't work together: same app
+      # id, version and release key, the Wear OS capabilities, every manifest component, all of
+      # Heartline's code and the SDKs it needs, assets and resources (tools/ci/check-apks.py).
+      - name: Check the APKs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 "$RUNNER_TEMP/tools/check-apks.py" \
+            --phone "dist/Heartline-phone-$VERSION.apk" \
+            --watch "dist/Heartline-watch-$VERSION.apk" \
+            --version-name "$VERSION" \
+            --version-code "${{ steps.version.outputs.code }}"
+
+      # Google Play bundles (no GitHub updater inside); uploaded as run artifacts only.
+      - name: Google Play bundles
+        if: env.CHANNEL != 'dev'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./gradlew --console=plain :phone:bundlePlay :wear:bundlePlay \
+            -Pheartline.versionName="$VERSION" \
+            -Pheartline.versionCode="${{ steps.version.outputs.code }}"
+          mkdir -p play
+          cp phone/build/outputs/bundle/play/*.aab "play/Heartline-phone-$VERSION.aab"
+          cp wear/build/outputs/bundle/play/*.aab "play/Heartline-watch-$VERSION.aab"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heartline-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload Play bundles
+        if: env.CHANNEL != 'dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heartline-play-${{ steps.version.outputs.version }}
+          path: play/
+          if-no-files-found: error
+
+      - name: Release body
+        if: inputs.release != 'off'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            case "$CHANNEL" in
+              stable) echo "> 📲 **Already using Heartline?** Update from the app: *Settings → Updates*." ;;
+              beta) echo "> **Beta:** a pre-release for testers. 📲 Update from the app: *Settings → Updates*, with the update channel set to *Beta* or *Development*." ;;
+              dev) echo "> **Development build:** the newest code, for early testers. 📲 Update from the app: *Settings → Updates*, on the *Development* update channel." ;;
+            esac
+            echo
+            echo "<!-- notes -->"
+            cat "$RUNNER_TEMP/notes.md"
+            echo "<!-- /notes -->"
+            echo
+            echo "### Install"
+            echo "Install **Heartline-phone-$VERSION.apk** on your phone and **Heartline-watch-$VERSION.apk** on your Galaxy Watch; both are needed. Already installed? The phone app updates itself (Settings → Updates) and tells you when the watch needs the new version. See [installing on a device](https://github.com/${{ github.repository }}/blob/main/docs/DEVICE_TESTING.md)."
+            echo
+            echo "Heartline is not a medical device. See the [Terms of Use](https://github.com/${{ github.repository }}/blob/main/legal/TERMS_OF_USE.md)."
+            echo
+            echo "SHA-256 checksums: \`SHA256SUMS\`."
+            # Lets a re-run of this workflow find its release (job 'check').
+            echo "<!-- heartline-run: ${{ github.run_id }} -->"
+            # Whether publishing this draft later announces it (the Release published workflow).
+            echo "<!-- heartline-telegram: ${{ inputs.telegram && 'yes' || 'no' }} -->"
+          } > "$RUNNER_TEMP/body.md"
+
+      # A draft keeps no tag until it's published (on GitHub → Releases); publishing it runs the
+      # "Release published" workflow, which updates CHANGELOG.md and announces it on Telegram.
+      - name: ${{ inputs.release == 'draft' && 'Save the release as a draft' || 'Publish GitHub release' }}
+        id: release
+        if: inputs.release != 'off'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: ${{ inputs.release == 'draft' }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Heartline ${{ steps.version.outputs.version }}${{ env.CHANNEL != 'stable' && format(' ({0})', env.CHANNEL) || '' }}
+          target_commitish: ${{ steps.sha.outputs.sha }}
+          prerelease: ${{ env.CHANNEL != 'stable' }}
+          make_latest: ${{ env.CHANNEL == 'stable' }}
+          body_path: ${{ runner.temp }}/body.md
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS
+
+      - name: Draft saved
+        if: inputs.release == 'draft'
+        env:
+          URL: ${{ steps.release.outputs.url }}
+        run: |
+          echo "::notice::Saved as a draft: publish it on GitHub → Releases ($URL). Publishing it updates CHANGELOG.md and announces it on Telegram."
+          echo "| Release | **Draft** ([open]($URL)): publish it on GitHub → Releases to release and announce it |" >> "$GITHUB_STEP_SUMMARY"
+
+      # Keeps CHANGELOG.md on the default branch in step with the releases (stable and beta only).
+      - name: Commit CHANGELOG.md
+        if: inputs.release == 'publish' && env.CHANNEL != 'dev'
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B changelog-update "origin/$DEFAULT_BRANCH"
+          python3 "$RELEASE_PY" changelog --version "$VERSION" --notes "$RUNNER_TEMP/notes.md" --changelog CHANGELOG.md
+          git add CHANGELOG.md
+          git diff --cached --quiet || { git commit -m "Changelog for $VERSION" && git push origin "HEAD:$DEFAULT_BRANCH"; }
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/
+            **/build/paparazzi/failures/
+          if-no-files-found: ignore
+
+  # Announces the release in the community's Telegram topic (Announcements & Builds) when the form's
+  # Telegram box is ticked (any channel, dev too), after a successful build, or again when a run
+  # whose release is already published is re-run.
+  # The notes come from the published release, the summary is written anew. Network errors are
+  # retried; a message that still can't be sent turns the run red (the release stays published).
+  announce:
+    needs: [check, build]
+    if: >-
+      always() && inputs.telegram && inputs.release == 'publish' && needs.check.outputs.draft != 'true' &&
+      (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.check.outputs.tag != ''))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ${{ needs.check.outputs.tag || needs.build.outputs.tag }}
+      URL: ${{ needs.check.outputs.url || needs.build.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools/release
+
+      - name: Release notes from ${{ env.TAG }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/release/release.py release-notes --tag "$TAG" --out "$RUNNER_TEMP/notes.md"
+
+      - name: Announce on Telegram
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID || '@HeartlineCommunity' }}
+          # Topic 'Announcements & Builds' (t.me/HeartlineCommunity/5); a variable or secret overrides it.
+          TELEGRAM_THREAD_ID: ${{ vars.TELEGRAM_THREAD_ID || secrets.TELEGRAM_THREAD_ID || '5' }}
+        run: |
+          python3 tools/release/release.py telegram \
+            --version "${TAG#v}" \
+            --channel "${{ inputs.channel }}" \
+            --notes "$RUNNER_TEMP/notes.md" \
+            --release-url "$URL"

@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Selin and Heartline contributors
+
+package com.heartline.phone.widget
+
+import com.heartline.datalayer.diag.HLog
+import android.content.Context
+import android.os.Build
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.updateAll
+import com.heartline.phone.data.BpRepository
+import com.heartline.phone.data.HeartRepository
+import com.heartline.phone.data.RecordRepository
+import com.heartline.shared.model.RecordKind
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlin.reflect.KClass
+
+/**
+ * Keeps the home-screen widgets current: any new record, heart-rate minute or calibration
+ * redraws them (debounced, so a sync burst is one update). The launcher also refreshes them every
+ * 30 minutes (updatePeriodMillis) so "Today"/"Yesterday" labels roll over.
+ */
+class WidgetUpdater(
+    private val context: Context,
+    private val records: RecordRepository,
+    private val heart: HeartRepository,
+    private val bp: BpRepository,
+    private val profiles: com.heartline.phone.data.ProfileRepository? = null,
+    private val settings: com.heartline.phone.data.SettingsRepository? = null,
+) {
+    @OptIn(FlowPreview::class)
+    fun start(scope: CoroutineScope) {
+        combine(
+            records.observe(RecordKind.ECG),
+            combine(
+                records.observe(RecordKind.BLOOD_PRESSURE),
+                records.observe(RecordKind.SPO2),
+                records.observe(RecordKind.SKIN_TEMPERATURE),
+                records.observe(RecordKind.BODY_COMPOSITION),
+                records.observe(RecordKind.STRESS),
+            ) { a, b, c, d, e -> listOf(a.size, b.size, c.size, d.size, e.size) },
+            // A new minute, or a new background reading from the watch.
+            combine(heart.latestMinute, heart.backgroundLatest) { m, b -> m?.minuteStartMs to listOf(b.spo2?.tsMs, b.temp?.tsMs, b.stress?.tsMs) },
+            bp.calibration,
+            // The name on widgets follows the profile and the "show my name" setting.
+            combine(profiles?.profile ?: flowOf(null), settings?.monitor ?: flowOf(null)) { p, s -> p?.displayName to s?.showNameOnWidgets },
+        ) { ecg, others, minute, calibration, name -> listOf(ecg.firstOrNull()?.entity?.id, others, minute, calibration?.id, name) }
+            .drop(1)
+            .debounce(1_500)
+            .onEach { updateAll() }
+            .launchIn(scope)
+        scope.launch { publishPreviews() }
+    }
+
+    suspend fun updateAll() {
+        runCatching {
+            DashboardWidget().updateAll(context)
+            HeartRateWidget().updateAll(context)
+            EcgWidget().updateAll(context)
+            BpWidget().updateAll(context)
+            StressWidget().updateAll(context)
+            QuickMeasureWidget().updateAll(context)
+            HeartDayWidget().updateAll(context)
+            MetricTileWidget().updateAll(context)
+            MeasureButtonWidget().updateAll(context)
+            com.heartline.phone.qs.HeartlineQsTile.refreshAll(context)
+        }.onFailure { HLog.w(HeartlineWidget.TAG, "widget update failed", it) }
+    }
+
+    /** Android 15+ widget picker: live previews drawn by the widgets themselves (sample data). */
+    private suspend fun publishPreviews() {
+        if (Build.VERSION.SDK_INT < 35) return
+        val manager = GlanceAppWidgetManager(context)
+        RECEIVERS.forEach { receiver ->
+            runCatching { manager.setWidgetPreviews(receiver) }.onFailure { HLog.w(HeartlineWidget.TAG, "preview for ${receiver.simpleName} failed", it) }
+        }
+    }
+
+    companion object {
+        val RECEIVERS: List<KClass<out GlanceAppWidgetReceiver>> = listOf(
+            DashboardWidgetReceiver::class,
+            HeartRateWidgetReceiver::class,
+            EcgWidgetReceiver::class,
+            BpWidgetReceiver::class,
+            StressWidgetReceiver::class,
+            QuickMeasureWidgetReceiver::class,
+            HeartDayWidgetReceiver::class,
+            MetricTileSmallReceiver::class,
+            MetricTileSlimReceiver::class,
+            MetricTileReceiver::class,
+            MeasureButtonReceiver::class,
+        )
+    }
+}

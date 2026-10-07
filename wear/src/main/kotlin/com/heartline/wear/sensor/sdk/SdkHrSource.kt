@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Selin and Heartline contributors
+
+package com.heartline.wear.sensor.sdk
+
+import com.heartline.datalayer.diag.HLog
+import com.heartline.shared.hr.HrSample
+import com.heartline.shared.hr.HrSamples
+import com.heartline.shared.sensor.TrackerKind
+import com.heartline.wear.sensor.GatewayState
+import com.heartline.wear.sensor.HrSource
+import com.heartline.wear.sensor.SensorException
+import com.heartline.wear.sensor.SensorProblem
+import com.heartline.wear.diag.RawCapture
+import com.samsung.android.service.health.tracking.HealthTracker
+import com.samsung.android.service.health.tracking.data.DataPoint
+import com.samsung.android.service.health.tracking.data.ValueKey
+import kotlinx.coroutines.CompletableDeferred
+import kotlin.concurrent.thread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * HEART_RATE_CONTINUOUS (sample: track-heart-rate-with-off-body-sensor.html).
+ *
+ * The app has one heart-rate tracker, and each listener replaces the previous one. The live screen,
+ * stress and the background irregular-rhythm window could otherwise steal it from each other (and
+ * the first to finish would stop it for everyone), so all collectors share one listener.
+ */
+class SdkHrSource(private val gateway: SdkSensorGateway) : HrSource {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** The tracker while someone listens, and the pending flush (see [flush]). */
+    @Volatile private var active: HealthTracker? = null
+
+    @Volatile private var flushed: CompletableDeferred<Unit>? = null
+
+    private val shared: SharedFlow<Result<HrSample>> = tracked()
+        .map { Result.success(it) }
+        .catch { emit(Result.failure(it)) }
+        .shareIn(scope, SharingStarted.WhileSubscribed(), replay = 0)
+
+    override fun stream(): Flow<HrSample> = shared.map { it.getOrThrow() }
+
+    override val isActive: Boolean get() = active != null
+
+    /**
+     * The tracker's flush() can block until it sends its next batch (minutes, with the screen off),
+     * which no coroutine timeout can stop: it runs on a thread of its own and is waited for at most
+     * [FLUSH_TIMEOUT_MS]. Readings that come later reach the next window.
+     */
+    override suspend fun flush(): Boolean {
+        val tracker = active ?: return false
+        val done = CompletableDeferred<Unit>().also { flushed = it }
+        val called = CompletableDeferred<Boolean>()
+        thread(name = "heartline-hr-flush", isDaemon = true) { called.complete(runCatching { tracker.flush() }.getOrDefault(false)) }
+        return withTimeoutOrNull(FLUSH_TIMEOUT_MS) { called.await() && run { done.await(); true } } == true
+    }
+
+    private fun tracked(): Flow<HrSample> = callbackFlow {
+        gateway.connect()
+        val state = withTimeout(10_000) { gateway.state.first { it is GatewayState.Connected || it is GatewayState.Failed } }
+        if (state is GatewayState.Failed) throw SensorException(state.problem)
+        if (TrackerKind.HEART_RATE_CONTINUOUS !in (state as GatewayState.Connected).trackers) {
+            throw SensorException(SensorProblem.NOT_SUPPORTED)
+        }
+        val tracker = gateway.tracker(TrackerKind.HEART_RATE_CONTINUOUS) ?: throw SensorException(SensorProblem.NOT_SUPPORTED)
+        tracker.setEventListener(
+            object : HealthTracker.TrackerEventListener {
+                override fun onDataReceived(points: List<DataPoint>) {
+                    RawCapture.sdk(TrackerKind.HEART_RATE_CONTINUOUS.name, points)
+                    points.forEach { trySendBlocking(it.toSample()) }
+                }
+
+                override fun onFlushCompleted() {
+                    flushed?.complete(Unit)
+                }
+
+                override fun onError(error: HealthTracker.TrackerError) {
+                    HLog.w(SdkSensorGateway.TAG, "HR tracker error: $error")
+                    close(SensorException(SdkSensorGateway.mapError(error)))
+                }
+            },
+        )
+        active = tracker
+        awaitClose {
+            active = null
+            tracker.unsetEventListener()
+        }
+    }
+
+    private companion object {
+        const val FLUSH_TIMEOUT_MS = 10_000L
+    }
+
+    private fun DataPoint.toSample(): HrSample {
+        val status = getValue(ValueKey.HeartRateSet.HEART_RATE_STATUS) ?: 0
+        val ibis = getValue(ValueKey.HeartRateSet.IBI_LIST).orEmpty()
+        val ibiStatus = getValue(ValueKey.HeartRateSet.IBI_STATUS_LIST).orEmpty()
+        if (ibis.isNotEmpty()) HLog.v(SdkSensorGateway.TAG, "HR status=$status ibis=$ibis ibiStatus=$ibiStatus")
+        return HrSamples.fromTracker(timestamp, getValue(ValueKey.HeartRateSet.HEART_RATE) ?: 0, status, ibis, ibiStatus)
+    }
+
+}
