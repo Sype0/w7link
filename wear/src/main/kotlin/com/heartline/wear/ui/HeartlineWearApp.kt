@@ -107,6 +107,7 @@ private object Routes {
     const val DEV_MODE = "dev_mode"
     const val DIAGNOSTICS = "diagnostics"
     const val OPTIONS = "options/{metric}"
+    const val COMPANION = "companion"
 
     fun options(metric: Metric) = "options/${metric.name}"
 
@@ -165,6 +166,9 @@ fun HeartlineWearApp(startRoute: String? = null) {
     val nav = rememberSwipeDismissableNavController()
     // Every start re-checks the phone link; once set up this runs quietly in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_START) { gate.check() }
+    // The companion link just came up (first pairing, or the phone came back): look for the phone again.
+    val linked = io.github.sype0.w7link.wear.rememberLink()?.state == io.github.sype0.w7link.wear.LinkService.State.CONNECTED
+    LaunchedEffect(linked) { if (linked) gate.check() }
 
     var pendingRoute by rememberSaveable { mutableStateOf(startRoute) }
     LaunchedEffect(bus) { bus.navigate.collect { pendingRoute = it } }
@@ -219,12 +223,17 @@ fun HeartlineWearApp(startRoute: String? = null) {
                     stringResource(R.string.link_checking_title),
                     stringResource(R.string.link_checking_body),
                 )
-                is GateState.PhoneProblem -> PhoneProblemScreen(
-                    g.stage,
-                    onRetry = { gate.check() },
-                    onOpenOnPhone = { gate.openOnPhone(SetupTarget.HOME) },
-                    opened = openedOnPhone,
-                )
+                // No phone yet because the companion link still needs the user: pair right here.
+                is GateState.PhoneProblem -> if (io.github.sype0.w7link.wear.companionNeedsUser()) {
+                    io.github.sype0.w7link.wear.WatchCompanionScreen()
+                } else {
+                    PhoneProblemScreen(
+                        g.stage,
+                        onRetry = { gate.check() },
+                        onOpenOnPhone = { gate.openOnPhone(SetupTarget.HOME) },
+                        opened = openedOnPhone,
+                    )
+                }
                 is GateState.SetupIncomplete -> SetupIncompleteScreen(
                     g.status.displayName.ifBlank { null },
                     // The phone app shows the terms before any other screen, so HOME is enough.
@@ -285,6 +294,7 @@ private fun AppNavHost(nav: NavHostController, gate: SetupGateViewModel) {
                         onOptions = { nav.navigate(Routes.options(it)) },
                         onHistory = { nav.navigate(Routes.HISTORY) },
                         onSettings = { nav.navigate(Routes.SETTINGS) },
+                        onPhone = { nav.navigate(Routes.COMPANION) },
                     )
                 }
                 is LauncherState.Problem -> SensorErrorScreen(state.problem, onAction = {
@@ -293,6 +303,7 @@ private fun AppNavHost(nav: NavHostController, gate: SetupGateViewModel) {
                 LauncherState.Loading -> LauncherScreen(emptyList())
             }
         }
+        composable(Routes.COMPANION) { io.github.sype0.w7link.wear.WatchCompanionScreen() }
         composable(Routes.ECG) { EcgFlow(onExit = exit) }
         composable(Routes.BLOOD_PRESSURE) {
             BpFlow(onExit = exit, onStartCalibration = { nav.openExternal(Routes.BP_CALIBRATION) })

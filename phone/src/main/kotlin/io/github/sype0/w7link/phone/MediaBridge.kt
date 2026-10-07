@@ -76,7 +76,7 @@ class MediaBridge(
     }
 
     fun push(force: Boolean) {
-        val controller = current
+        val controller = current.takeIf { CompanionPref.MEDIA.get(context) }
         val meta = controller?.metadata
         val message = Proto.msg(
             "media",

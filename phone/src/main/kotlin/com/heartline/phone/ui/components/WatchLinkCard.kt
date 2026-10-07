@@ -57,6 +57,9 @@ fun WatchLinkCard(link: WatchLinkUi?, onRetry: () -> Unit, onOpenWatch: () -> Un
             if (link.probe == PeerProbe.REACHABLE) {
                 TonalPillButton(stringResource(R.string.link_open_on_watch), onClick = onOpenWatch, color = colors.primary)
             } else {
+                // Pairing happens right here: the permission, the code to confirm, or what to do on the watch.
+                io.github.sype0.w7link.phone.CompanionLinkControls(onChanged = onRetry)
+                Spacer(Modifier.height(12.dp))
                 TonalPillButton(stringResource(R.string.action_check_again), onClick = onRetry, color = colors.primary)
             }
         }

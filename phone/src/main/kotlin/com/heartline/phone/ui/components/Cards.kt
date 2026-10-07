@@ -161,7 +161,7 @@ fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick
     Text(
         text,
         style = MaterialTheme.typography.labelLarge,
-        color = if (selected) androidx.compose.ui.graphics.Color.White else colors.onBackground,
+        color = if (selected) colors.onPrimary else colors.onBackground,
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(if (selected) colors.primary else colors.surface)

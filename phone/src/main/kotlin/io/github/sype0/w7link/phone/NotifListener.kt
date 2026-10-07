@@ -4,6 +4,7 @@
 package io.github.sype0.w7link.phone
 
 import android.app.ActivityOptions
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.RemoteInput
@@ -13,10 +14,12 @@ import android.graphics.Canvas
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Base64
 import android.util.Log
+import com.heartline.phone.R
 import io.github.sype0.w7link.common.Proto
 import org.json.JSONArray
 import org.json.JSONObject
@@ -45,26 +48,34 @@ class NotifListener : NotificationListenerService() {
         if (pkg == packageName) return
         if (n.flags and (Notification.FLAG_GROUP_SUMMARY or Notification.FLAG_LOCAL_ONLY) != 0) return
         val call = n.category == Notification.CATEGORY_CALL
-        if (sbn.isOngoing && !call) return
-        link.noteSeen(pkg)
-        if (link.isMuted(pkg)) return
+        if (!(if (call) CompanionPref.CALLS else CompanionPref.NOTIFICATIONS).get(this)) return
+        if (sbn.isOngoing && !call && !CompanionPref.INCLUDE_ONGOING.get(this)) return
+        CompanionPrefs.noteSeen(this, pkg)
+        if (pkg in CompanionPrefs.mutedApps(this)) return
         val ranking = NotificationListenerService.Ranking()
         if (currentRanking.getRanking(sbn.key, ranking)) {
-            // Silent notifications and anything Do Not Disturb is hiding stay on the phone.
-            if (ranking.importance < NotificationManager.IMPORTANCE_DEFAULT) return
-            if (!ranking.matchesInterruptionFilter()) return
+            // Unless asked otherwise, silent notifications and anything Do Not Disturb is hiding stay on the phone.
+            if (ranking.importance < NotificationManager.IMPORTANCE_DEFAULT && !CompanionPref.INCLUDE_SILENT.get(this)) return
+            if (!ranking.matchesInterruptionFilter() && CompanionPref.RESPECT_DND.get(this)) return
         }
+        if (!call && CompanionPref.ONLY_WHEN_LOCKED.get(this) && inUse()) return
 
-        val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = (n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-            ?: n.extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty().take(MAX_TEXT)
+        val hide = CompanionPref.HIDE_CONTENT.get(this) && !call
+        val title = if (hide) appLabel(pkg) else n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = if (hide) {
+            getString(R.string.cmp_hidden_text)
+        } else {
+            (n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+                ?: n.extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty().take(MAX_TEXT)
+        }
         if (title.isEmpty() && text.isEmpty()) return
         val signature = "$title\n$text"
         if (sent[sbn.key] == signature) return
         sent[sbn.key] = signature
 
         val actions = JSONArray()
-        n.actions?.take(MAX_ACTIONS)?.forEach {
+        // A reply box would show the conversation it belongs to, so hidden content carries no actions.
+        n.actions?.takeUnless { hide }?.take(MAX_ACTIONS)?.forEach {
             actions.put(
                 JSONObject()
                     .put("title", it.title?.toString().orEmpty())
@@ -93,6 +104,10 @@ class NotifListener : NotificationListenerService() {
         }
         if (sent.remove(sbn.key) != null) LinkService.instance?.send(Proto.msg("notif_rm", "key" to sbn.key))
     }
+
+    /** The phone is unlocked with its screen on: the user sees notifications here already. */
+    private fun inUse() = getSystemService(PowerManager::class.java).isInteractive &&
+        !getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
     fun dismiss(key: String) {
         try {

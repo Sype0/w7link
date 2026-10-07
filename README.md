@@ -33,8 +33,13 @@ Heartline'dan farkları:
 - Medya kontrolü (önceki, oynat-duraklat, sonraki, ses)
 - Telefonumu bul, saatimi bul, karşılıklı pil durumu, günlük adım
 
-Bunlar uygulama çekmecesindeki ikinci simgeden, **W7Link Eşlikçi**'den yönetilir.
-Eşleştirme de oradan yapılır.
+Bunlar uygulamanın içindedir: telefonda **Ayarlar → Saat eşlikçisi**, saatte ana listedeki
+**Telefon**. Hangi uygulamaların aktarılacağı, içeriği gizleme, yalnızca telefon kilitliyken
+aktarma, Rahatsız Etmeyin'e uyma, sessiz ve kalıcı bildirimler, düşük saat pili ve telefon
+uzakta uyarıları oradan açılıp kapatılır.
+
+Görünüm de ayarlanabilir (**Ayarlar → Görünüm**): duvar kağıdı renklerini kullanan Material You
+teması (varsayılan) veya Heartline'ın klasik paleti; açık, koyu veya sistemle aynı.
 
 ## Ne yapmaz
 
@@ -53,16 +58,16 @@ APK'lar [Releases](../../releases) sayfasındadır.
    adb connect <saat-ip>:<port>
    adb install w7link-wear-*.apk
    ```
-3. İki cihazda da **W7Link Eşlikçi**'yi açıp izinleri verin. İki ekranda aynı 6 haneli kod
-   çıkar; aynıysa ikisinde de onaylayın. Sağlık verisi de bu bağlantıdan akar, yani
-   eşleştirme bitmeden ana uygulama saati göremez.
-4. Telefonda "Bildirim erişimini aç" düğmesi bildirim erişimi ayarını açar. Android 13 ve
+3. İki cihazda da **W7Link**'i açın. Kurulum ekranındaki saat kartı Bluetooth iznini ister;
+   ardından iki ekranda aynı 6 haneli kod çıkar. Aynıysa ikisinde de onaylayın. Sağlık verisi
+   de bu bağlantıdan akar.
+4. Telefonda **Ayarlar → Saat eşlikçisi → Bildirim erişimine izin ver**. Android 13 ve
    sonrasında bu ayar elle kurulan uygulamalar için kilitli gelir: Uygulama bilgisi → ⋮ →
    "Kısıtlanmış ayarlara izin ver".
 5. Sağlık sensörleri için saatte **Health Platform** uygulamasının geliştirici modunu açın
    (Ayarlar → Uygulamalar → Health Platform → başlığa yaklaşık 10 kez dokunun). Ayrıntı:
    [docs/SAMSUNG_HEALTH_SENSOR_SDK.md](docs/SAMSUNG_HEALTH_SENSOR_SDK.md).
-6. Ana **W7Link** uygulamasını telefonda ve saatte açıp kurulumu (koşullar, profil) tamamlayın.
+6. Telefonda ve saatte kurulumun kalanını (koşullar, profil) tamamlayın.
 
 ## Derleme
 

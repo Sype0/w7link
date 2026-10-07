@@ -3,15 +3,22 @@
 
 package com.heartline.phone.ui.theme
 
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.heartline.shared.design.Palette
 import com.heartline.shared.model.Metric
 import com.heartline.shared.model.Severity
@@ -40,6 +47,8 @@ data class HeartlineColors(
     val ecgGridMinor: Color,
     val ecgTrace: Color,
     val isDark: Boolean,
+    /** Text and icons on [primary]: white on the classic palette, whatever Material You pairs with it otherwise. */
+    val onPrimary: Color = Color.White,
 ) {
     fun metric(metric: Metric): Color = when (metric) {
         Metric.ECG -> ecg
@@ -86,8 +95,64 @@ object HeartlineTheme {
         @Composable get() = LocalHeartlineColors.current
 }
 
+enum class ThemeStyle { MATERIAL_YOU, CLASSIC }
+
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+/** The user's theme choices, as Compose state so the whole app follows a change at once. */
+object ThemePrefs {
+    var style by mutableStateOf(ThemeStyle.MATERIAL_YOU)
+        private set
+    var mode by mutableStateOf(ThemeMode.SYSTEM)
+        private set
+
+    private fun prefs(context: Context) = context.getSharedPreferences("ui", Context.MODE_PRIVATE)
+
+    fun load(context: Context) {
+        style = ThemeStyle.entries.firstOrNull { it.name == prefs(context).getString("style", null) } ?: ThemeStyle.MATERIAL_YOU
+        mode = ThemeMode.entries.firstOrNull { it.name == prefs(context).getString("mode", null) } ?: ThemeMode.SYSTEM
+    }
+
+    fun setStyle(context: Context, value: ThemeStyle) {
+        style = value
+        prefs(context).edit().putString("style", value.name).apply()
+    }
+
+    fun setMode(context: Context, value: ThemeMode) {
+        mode = value
+        prefs(context).edit().putString("mode", value.name).apply()
+    }
+
+    @Composable
+    fun dark(): Boolean = when (mode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+}
+
 @Composable
-fun HeartlineTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun HeartlineTheme(darkTheme: Boolean = ThemePrefs.dark(), content: @Composable () -> Unit) {
+    if (ThemePrefs.style == ThemeStyle.MATERIAL_YOU) {
+        // Material 3 with the system's wallpaper colours; the metric and status colours keep their meaning.
+        val context = LocalContext.current
+        val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        val base = if (darkTheme) DarkHeartlineColors else LightHeartlineColors
+        val themed = base.copy(
+            background = dynamic.surface,
+            surface = dynamic.surfaceContainer,
+            surfaceVariant = dynamic.surfaceContainerHighest,
+            onBackground = dynamic.onSurface,
+            onSurfaceVariant = dynamic.onSurfaceVariant,
+            divider = dynamic.outlineVariant,
+            primary = dynamic.primary,
+            onPrimary = dynamic.onPrimary,
+        )
+        CompositionLocalProvider(LocalHeartlineColors provides themed) {
+            MaterialTheme(colorScheme = dynamic, typography = HeartlineTypography, content = content)
+        }
+        return
+    }
     val colors = if (darkTheme) DarkHeartlineColors else LightHeartlineColors
     val scheme = if (darkTheme) {
         darkColorScheme(

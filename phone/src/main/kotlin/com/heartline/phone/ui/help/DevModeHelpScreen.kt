@@ -52,7 +52,7 @@ fun DevModeHelpScreen(onBack: (() -> Unit)? = null, onCheckOnWatch: () -> Unit =
                 devModeSteps.forEachIndexed { i, step ->
                     Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(bottom = if (i == devModeSteps.lastIndex) 0.dp else 16.dp)) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp).background(colors.primary, CircleShape)) {
-                            Text("${i + 1}", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                            Text("${i + 1}", style = MaterialTheme.typography.labelLarge, color = colors.onPrimary)
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {

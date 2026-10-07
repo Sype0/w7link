@@ -33,7 +33,7 @@ fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
     Button(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = if (color == HeartlineTheme.colors.primary) HeartlineTheme.colors.onPrimary else Color.White),
         modifier = modifier.fillMaxWidth().height(Dimens.buttonHeight),
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge)

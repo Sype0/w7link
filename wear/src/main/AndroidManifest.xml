@@ -489,18 +489,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Companion: the link to the phone, mirrored notifications and its own screen. -->
-        <activity
-            android:name="io.github.sype0.w7link.wear.CompanionActivity"
-            android:exported="true"
-            android:label="@string/companion_name"
-            android:taskAffinity="io.github.sype0.w7link.companion">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
+        <!-- Companion: the link to the phone and mirrored notifications. Its screen is part of the app. -->
         <service
             android:name="io.github.sype0.w7link.wear.LinkService"
             android:exported="false"

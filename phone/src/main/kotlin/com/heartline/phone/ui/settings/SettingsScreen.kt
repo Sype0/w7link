@@ -191,6 +191,8 @@ fun SettingsScreen(
     stressLimits: com.heartline.shared.stress.StressLimits? = null,
     /** Opens the monitoring setup to change the health answers. */
     onHealthAnswers: () -> Unit = {},
+    /** Opens the watch companion: pairing, notifications, calls and media. */
+    onCompanion: () -> Unit = {},
 ) {
     var editingPrompt by remember { mutableStateOf(false) }
     var offStep by remember { mutableIntStateOf(initialOffStep) }
@@ -221,10 +223,20 @@ fun SettingsScreen(
                         },
                     ),
                     leading = { IconBadge(Icons.Rounded.Watch, colors.body) },
+                    showDivider = true,
                     onClick = onWatch,
+                )
+                CardRow(
+                    stringResource(R.string.cmp_title),
+                    subtitle = stringResource(R.string.cmp_summary),
+                    leading = { IconBadge(Icons.Rounded.NotificationsActive, colors.primary) },
+                    onClick = onCompanion,
                 )
             }
         }
+
+        item { SectionHeader(stringResource(R.string.cmp_section_appearance)) }
+        item { io.github.sype0.w7link.phone.AppearanceCard(Modifier.gutter()) }
 
         item { SectionHeader(stringResource(R.string.settings_monitoring)) }
         item {
@@ -776,7 +788,7 @@ fun OneUiSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
         checked = checked,
         onCheckedChange = onChange,
         colors = SwitchDefaults.colors(
-            checkedThumbColor = Color.White,
+            checkedThumbColor = colors.onPrimary,
             checkedTrackColor = colors.primary,
             checkedBorderColor = colors.primary,
             uncheckedThumbColor = colors.onSurfaceVariant,

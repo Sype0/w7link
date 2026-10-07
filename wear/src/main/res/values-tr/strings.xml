@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Turkish for the companion's own strings; the Heartline screens are English only for now. -->
+<resources>
+    <string name="cmp_title">Telefon</string>
+    <string name="cmp_state_no_permission">Bluetooth izni gerekli</string>
+    <string name="cmp_state_bt_off">Bluetooth kapalı</string>
+    <string name="cmp_state_waiting">Telefon bekleniyor</string>
+    <string name="cmp_state_pairing">Eşleştirmeyi onayla</string>
+    <string name="cmp_state_connected">Telefona bağlı</string>
+    <string name="cmp_grant">İzin ver</string>
+    <string name="cmp_permission_hint">W7Link telefona Bluetooth üzerinden ulaşır.</string>
+    <string name="cmp_pair_hint">Eşleştirmek için telefonda W7Link\'i açın.</string>
+    <string name="cmp_pair_compare">Telefonda da aynı kod mu?</string>
+    <string name="cmp_pair_confirm">Kodlar aynı</string>
+    <string name="cmp_cancel">Vazgeç</string>
+    <string name="cmp_phone_battery">Telefon pili %%%1$d</string>
+    <string name="cmp_nothing_playing">Çalan bir şey yok</string>
+    <string name="cmp_volume">Ses %1$d/%2$d</string>
+    <string name="cmp_find_phone">Telefonumu bul</string>
+    <string name="cmp_stop_find">Telefonu sustur</string>
+    <string name="cmp_steps_today">Bugün %1$d adım</string>
+    <string name="cmp_unpair">Bu telefonu unut</string>
+    <string name="cmp_channel_link">Telefon bağlantısı</string>
+    <string name="cmp_channel_mirror">Telefon bildirimleri</string>
+    <string name="cmp_channel_call">Aramalar</string>
+    <string name="cmp_channel_find">Saatimi bul</string>
+    <string name="cmp_channel_alerts">Telefon uyarıları</string>
+    <string name="cmp_ring_title">Telefon bu saati arıyor</string>
+    <string name="cmp_ring_text">Susturmak için dokunun</string>
+    <string name="cmp_silence">Sessize al</string>
+    <string name="cmp_lost_title">Telefon uzakta</string>
+    <string name="cmp_lost_text">Telefonla bağlantı koptu.</string>
+    <string name="cmp_prev">Önceki</string>
+    <string name="cmp_play_pause">Oynat veya duraklat</string>
+    <string name="cmp_next">Sonraki</string>
+    <string name="cmp_vol_down">Sesi kıs</string>
+    <string name="cmp_vol_up">Sesi aç</string>
+</resources>

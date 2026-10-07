@@ -435,5 +435,40 @@
     <string name="diag_logs_off">Off</string>
     <string name="diag_logs_on">On · %1$s kept (50 MB at most)</string>
     <string name="diag_logs_hint">Change and export them in W7Link on your phone: Settings → Help &amp; diagnostics.</string>
-    <string name="companion_name">W7Link Eşlikçi</string>
+
+    <!-- Phone companion (W7Link). -->
+    <string name="cmp_title">Phone</string>
+    <string name="cmp_state_no_permission">Bluetooth permission needed</string>
+    <string name="cmp_state_bt_off">Bluetooth is off</string>
+    <string name="cmp_state_waiting">Waiting for the phone</string>
+    <string name="cmp_state_pairing">Confirm pairing</string>
+    <string name="cmp_state_connected">Connected to the phone</string>
+    <string name="cmp_grant">Allow</string>
+    <string name="cmp_permission_hint">W7Link reaches the phone over Bluetooth.</string>
+    <string name="cmp_pair_hint">Open W7Link on the phone to pair.</string>
+    <string name="cmp_pair_compare">Same code on the phone?</string>
+    <string name="cmp_pair_confirm">Codes match</string>
+    <string name="cmp_cancel">Cancel</string>
+    <string name="cmp_phone_battery">Phone battery %1$d%%</string>
+    <string name="cmp_nothing_playing">Nothing playing</string>
+    <string name="cmp_volume">Volume %1$d/%2$d</string>
+    <string name="cmp_find_phone">Find my phone</string>
+    <string name="cmp_stop_find">Stop ringing</string>
+    <string name="cmp_steps_today">%1$d steps today</string>
+    <string name="cmp_unpair">Forget this phone</string>
+    <string name="cmp_channel_link">Phone connection</string>
+    <string name="cmp_channel_mirror">Phone notifications</string>
+    <string name="cmp_channel_call">Calls</string>
+    <string name="cmp_channel_find">Find my watch</string>
+    <string name="cmp_channel_alerts">Phone alerts</string>
+    <string name="cmp_ring_title">The phone is looking for this watch</string>
+    <string name="cmp_ring_text">Tap to stop</string>
+    <string name="cmp_silence">Silence</string>
+    <string name="cmp_lost_title">Phone out of range</string>
+    <string name="cmp_lost_text">The link to your phone dropped.</string>
+    <string name="cmp_prev">Previous</string>
+    <string name="cmp_play_pause">Play or pause</string>
+    <string name="cmp_next">Next</string>
+    <string name="cmp_vol_down">Volume down</string>
+    <string name="cmp_vol_up">Volume up</string>
 </resources>

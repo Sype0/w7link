@@ -29,6 +29,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -37,6 +38,8 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Base64
 import android.util.Log
+import com.heartline.datalayer.DeepLinks
+import com.heartline.phone.MainActivity
 import com.heartline.phone.R
 import io.github.sype0.w7link.common.Keys
 import io.github.sype0.w7link.common.LinkHub
@@ -45,6 +48,7 @@ import io.github.sype0.w7link.common.SecureChannel
 import org.json.JSONObject
 import java.io.IOException
 import java.security.KeyPair
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
@@ -76,6 +80,12 @@ class LinkService : Service() {
     @Volatile
     var ringingWatch = false
         private set
+
+    /** Bumped with every stored step count, so the screen knows to read the newest one. */
+    @Volatile
+    var healthVersion = 0
+        private set
+    private var lowBatteryShown = false
 
     lateinit var media: MediaBridge
         private set
@@ -144,10 +154,13 @@ class LinkService : Service() {
         health = HealthDb(this)
         notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_LINK, "Bağlantı durumu", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_LINK, getString(R.string.cmp_channel_link), NotificationManager.IMPORTANCE_LOW)
         )
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_FIND, "Telefonumu bul", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(CHANNEL_FIND, getString(R.string.cmp_channel_find), NotificationManager.IMPORTANCE_HIGH)
+        )
+        notifications.createNotificationChannel(
+            NotificationChannel(CHANNEL_ALERTS, getString(R.string.cmp_channel_alerts), NotificationManager.IMPORTANCE_DEFAULT)
         )
         media = MediaBridge(this, main) { send(it) }
         instance = this
@@ -249,8 +262,9 @@ class LinkService : Service() {
                 pairCode = link.code
                 setState(State.PAIRING)
             } else {
+                attachHub(link)
                 setState(State.CONNECTED)
-                onConnected(link)
+                onConnected()
             }
             while (true) {
                 val (kind, body) = link.receiveFrame()
@@ -284,7 +298,8 @@ class LinkService : Service() {
         }
     }
 
-    private fun onConnected(link: SecureChannel) {
+    /** Before the state says connected: whoever reacts to that must find the sync transport ready. */
+    private fun attachHub(link: SecureChannel) {
         LinkHub.attach { kind, body ->
             try {
                 link.sendFrame(kind, body)
@@ -294,11 +309,15 @@ class LinkService : Service() {
                 false
             }
         }
+    }
+
+    private fun onConnected() {
         send(Proto.msg("hello", "name" to Build.MODEL))
         main.post {
             lastBattery = ""
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { sendBattery(it) }
             media.push(true)
+            sendPrefs()
         }
     }
 
@@ -331,15 +350,17 @@ class LinkService : Service() {
                 m.getInt("idx"),
                 if (m.has("text")) m.getString("text") else null,
             )
-            "media_cmd" -> media.command(m.getString("cmd"))
+            "media_cmd" -> if (CompanionPref.MEDIA.get(this)) media.command(m.getString("cmd"))
             "battery" -> {
                 watchBattery = m.getInt("level")
                 watchCharging = m.getBoolean("charging")
+                lowBatteryAlert()
                 notifyUi()
             }
             "health" -> {
                 val ts = m.getLong("ts")
                 health.insert(ts, m.getInt("hr"), m.getInt("steps"))
+                healthVersion++
                 send(Proto.msg("health_ack", "ts" to ts))
                 notifyUi()
             }
@@ -362,8 +383,9 @@ class LinkService : Service() {
         if (state != State.PAIRING || !localOk || !remoteOk) return
         prefs.edit().putString(PREF_PEER, Base64.encodeToString(link.peerKey, Base64.NO_WRAP)).apply()
         pairCode = null
+        attachHub(link)
         setState(State.CONNECTED)
-        onConnected(link)
+        onConnected()
     }
 
     fun cancelPairing() {
@@ -379,23 +401,34 @@ class LinkService : Service() {
     val paired: Boolean
         get() = prefs.getString(PREF_PEER, null) != null
 
-    // --- notification filter ---
+    // --- small tools ---
 
-    fun isMuted(pkg: String) = prefs.getStringSet(PREF_MUTED, emptySet())!!.contains(pkg)
-
-    fun mutedApps(): Set<String> = HashSet(prefs.getStringSet(PREF_MUTED, emptySet())!!)
-
-    fun setMutedApps(apps: Set<String>) = prefs.edit().putStringSet(PREF_MUTED, HashSet(apps)).apply()
-
-    /** Apps that have posted something forwardable; the filter screen lists these. */
-    fun seenApps(): Set<String> = HashSet(prefs.getStringSet(PREF_SEEN, emptySet())!!)
-
-    fun noteSeen(pkg: String) {
-        val seen = prefs.getStringSet(PREF_SEEN, emptySet())!!
-        if (pkg !in seen) prefs.edit().putStringSet(PREF_SEEN, HashSet(seen).apply { add(pkg) }).apply()
+    /** Options the watch applies itself. Sent on connect and whenever one changes. */
+    fun sendPrefs() {
+        send(Proto.msg("prefs", "disconnectAlert" to CompanionPref.DISCONNECT_ALERT.get(this)))
     }
 
-    // --- small tools ---
+    /** One notification per discharge once the watch is nearly empty. */
+    private fun lowBatteryAlert() {
+        val low = watchBattery in 0..LOW_BATTERY_PERCENT && !watchCharging
+        if (!low) {
+            if (watchCharging || watchBattery > LOW_BATTERY_PERCENT + 5) {
+                lowBatteryShown = false
+                notifications.cancel(NOTIFICATION_LOW_BATTERY)
+            }
+            return
+        }
+        if (lowBatteryShown || !CompanionPref.LOW_BATTERY_ALERT.get(this)) return
+        lowBatteryShown = true
+        notifications.notify(
+            NOTIFICATION_LOW_BATTERY,
+            Notification.Builder(this, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_w7link)
+                .setContentTitle(getString(R.string.cmp_low_battery_title, watchBattery))
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
 
     fun ringWatch(on: Boolean) {
         ringingWatch = on
@@ -457,8 +490,8 @@ class LinkService : Service() {
             NOTIFICATION_FIND,
             Notification.Builder(this, CHANNEL_FIND)
                 .setSmallIcon(R.drawable.ic_w7link)
-                .setContentTitle("Saat telefonu arıyor")
-                .setContentText("Susturmak için dokunun")
+                .setContentTitle(getString(R.string.cmp_find_title))
+                .setContentText(getString(R.string.cmp_find_text))
                 .setContentIntent(stop)
                 .setAutoCancel(true)
                 .build(),
@@ -477,16 +510,18 @@ class LinkService : Service() {
     }
 
     private fun notifyUi() {
-        main.post { uiListener?.invoke() }
+        main.post { uiListeners.forEach { it() } }
     }
 
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, CompanionActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0,
+            Intent(Intent.ACTION_VIEW, Uri.parse(DeepLinks.phone(COMPANION_ROUTE)), this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_LINK)
             .setSmallIcon(R.drawable.ic_w7link)
-            .setContentTitle(statusText(state))
+            .setContentTitle(getString(statusText(state)))
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -496,22 +531,25 @@ class LinkService : Service() {
         private const val TAG = "W7Link"
         private const val CHANNEL_LINK = "link"
         private const val CHANNEL_FIND = "find"
+        private const val CHANNEL_ALERTS = "alerts"
+        private const val NOTIFICATION_LOW_BATTERY = 3
+        private const val LOW_BATTERY_PERCENT = 15
         private const val NOTIFICATION_LINK = 1
         private const val NOTIFICATION_FIND = 2
         private const val PREF_PEER = "peer"
-        private const val PREF_MUTED = "muted"
-        private const val PREF_SEEN = "seen"
         private const val RETRY_MS = 4_000L
         private const val RESCAN_MS = 20 * 60_000L
         private const val FIND_TIMEOUT_MS = 60_000L
         const val ACTION_FIND_STOP = "io.github.sype0.w7link.phone.FIND_STOP"
 
+        /** The companion screen's route in the app, also used as its deep link. */
+        const val COMPANION_ROUTE = "companion"
+
         @Volatile
         var instance: LinkService? = null
 
-        /** Invoked on the main thread whenever something the activity shows has changed. */
-        @Volatile
-        var uiListener: (() -> Unit)? = null
+        /** Invoked on the main thread whenever something the companion screens show has changed. */
+        val uiListeners = CopyOnWriteArraySet<() -> Unit>()
 
         fun hasPermissions(context: Context) =
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
@@ -528,12 +566,12 @@ class LinkService : Service() {
         }
 
         fun statusText(state: State) = when (state) {
-            State.NO_PERMISSION -> "Bluetooth izni gerekli"
-            State.BT_OFF -> "Bluetooth kapalı"
-            State.SCANNING -> "Saat aranıyor"
-            State.CONNECTING -> "Saate bağlanılıyor"
-            State.PAIRING -> "Eşleştirme onayı bekleniyor"
-            State.CONNECTED -> "Saate bağlı"
+            State.NO_PERMISSION -> R.string.cmp_state_no_permission
+            State.BT_OFF -> R.string.cmp_state_bt_off
+            State.SCANNING -> R.string.cmp_state_scanning
+            State.CONNECTING -> R.string.cmp_state_connecting
+            State.PAIRING -> R.string.cmp_state_pairing
+            State.CONNECTED -> R.string.cmp_state_connected
         }
     }
 }

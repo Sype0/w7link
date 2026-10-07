@@ -129,6 +129,8 @@ object Routes {
     const val DOC = "doc/{doc}"
     const val UPDATES = PhoneNotifier.UPDATES_ROUTE
     const val DIAGNOSTICS = "diagnostics"
+    const val COMPANION = io.github.sype0.w7link.phone.LinkService.COMPANION_ROUTE
+    const val COMPANION_APPS = "companion/apps"
 
     fun doc(doc: BundledDoc) = "doc/${doc.route}"
 
@@ -164,6 +166,8 @@ fun HeartlineApp(
             Routes.UPDATES, PhoneNotifier.UPDATES_INSTALL_ROUTE -> link.route
             // Home-screen widgets open their metric.
             Routes.HEART_RATE, Routes.ECG, Routes.BLOOD_PRESSURE -> link.route
+            // The link service's status notification.
+            Routes.COMPANION -> link.route
             else -> link.route.takeIf { it.startsWith("metric/") && Metric.entries.any { m -> it == Routes.metric(m) } } ?: Routes.HOME
         }
         when {
@@ -298,6 +302,7 @@ fun HeartlineApp(
                             )
                         },
                         onAbout = { navController.navigate(Routes.ABOUT) },
+                        onCompanion = { navController.navigate(Routes.COMPANION) },
                         onUpdates = { navController.navigate(Routes.UPDATES) },
                         onDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                         diagnosticLogs = monitor.diagnosticLogs,
@@ -413,6 +418,12 @@ fun HeartlineApp(
                 }
                 composable(Routes.DEV_MODE_HELP) {
                     DevModeHelpScreen(onBack = goBack, onCheckOnWatch = { openOnWatch(WatchRoutes.SETUP) })
+                }
+                composable(Routes.COMPANION) {
+                    io.github.sype0.w7link.phone.CompanionScreen(onBack = goBack, onApps = { navController.navigate(Routes.COMPANION_APPS) })
+                }
+                composable(Routes.COMPANION_APPS) {
+                    io.github.sype0.w7link.phone.CompanionAppsScreen(onBack = goBack)
                 }
                 composable(Routes.ABOUT) {
                     AboutScreen(BuildConfig.VERSION_NAME, onBack = goBack, onOpenDoc = { navController.navigate(Routes.doc(it)) })

@@ -50,6 +50,7 @@ class PhoneApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         HLog.init(this, HLog.PHONE_BUDGET_BYTES)
+        com.heartline.phone.ui.theme.ThemePrefs.load(this)
         startKoin {
             androidContext(this@PhoneApplication)
             modules(phoneModule)

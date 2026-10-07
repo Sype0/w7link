@@ -47,6 +47,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Base64
 import android.util.Log
+import com.heartline.wear.MainActivity
 import com.heartline.wear.R
 import io.github.sype0.w7link.common.Keys
 import io.github.sype0.w7link.common.LinkHub
@@ -59,6 +60,7 @@ import java.security.KeyPair
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
@@ -131,6 +133,20 @@ class LinkService : Service(), SensorEventListener {
     private val finishSample = Runnable { completeSample() }
     private val stopRing = Runnable { ring(false) }
 
+    /** The left-behind alert, held back a little so a brief dropout doesn't buzz. */
+    private val lostAlert = Runnable {
+        if (state == State.CONNECTED || !prefs.getBoolean(PREF_DISCONNECT_ALERT, false)) return@Runnable
+        notifications.notify(
+            NOTIFICATION_LOST,
+            Notification.Builder(this, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_w7link)
+                .setContentTitle(getString(R.string.cmp_lost_title))
+                .setContentText(getString(R.string.cmp_lost_text))
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
     private val systemEvents = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -157,19 +173,22 @@ class LinkService : Service(), SensorEventListener {
         notifications = getSystemService(NotificationManager::class.java)
         wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "w7link:sample")
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_LINK, "Bağlantı durumu", NotificationManager.IMPORTANCE_MIN)
+            NotificationChannel(CHANNEL_LINK, getString(R.string.cmp_channel_link), NotificationManager.IMPORTANCE_MIN)
         )
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_MIRROR, "Telefon bildirimleri", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(CHANNEL_MIRROR, getString(R.string.cmp_channel_mirror), NotificationManager.IMPORTANCE_HIGH)
         )
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_CALL, "Aramalar", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(CHANNEL_CALL, getString(R.string.cmp_channel_call), NotificationManager.IMPORTANCE_HIGH).apply {
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 800, 500, 800, 500, 800, 500, 800)
             }
         )
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_FIND, "Saatimi bul", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(CHANNEL_FIND, getString(R.string.cmp_channel_find), NotificationManager.IMPORTANCE_HIGH)
+        )
+        notifications.createNotificationChannel(
+            NotificationChannel(CHANNEL_ALERTS, getString(R.string.cmp_channel_alerts), NotificationManager.IMPORTANCE_HIGH)
         )
         JSONArray(prefs.getString(PREF_PENDING, null) ?: "[]").let { saved ->
             for (i in 0 until saved.length()) pending.add(saved.getJSONObject(i))
@@ -330,8 +349,9 @@ class LinkService : Service(), SensorEventListener {
                 pairCode = link.code
                 setState(State.PAIRING)
             } else {
+                attachHub(link)
                 setState(State.CONNECTED)
-                onConnected(link)
+                onConnected()
             }
             while (true) {
                 val (kind, body) = link.receiveFrame()
@@ -349,6 +369,7 @@ class LinkService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.i(TAG, "link closed: $e")
         } finally {
+            if (state == State.CONNECTED) main.postDelayed(lostAlert, LOST_DELAY_MS)
             LinkHub.detach()
             channel = null
             pairCode = null
@@ -360,7 +381,8 @@ class LinkService : Service(), SensorEventListener {
         }
     }
 
-    private fun onConnected(link: SecureChannel) {
+    /** Before the state says connected: whoever reacts to that must find the sync transport ready. */
+    private fun attachHub(link: SecureChannel) {
         LinkHub.attach { kind, body ->
             try {
                 link.sendFrame(kind, body)
@@ -370,7 +392,12 @@ class LinkService : Service(), SensorEventListener {
                 false
             }
         }
+    }
+
+    private fun onConnected() {
         send(Proto.msg("hello", "name" to Build.MODEL))
+        main.removeCallbacks(lostAlert)
+        notifications.cancel(NOTIFICATION_LOST)
         main.post {
             lastBattery = ""
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { sendBattery(it) }
@@ -413,6 +440,7 @@ class LinkService : Service(), SensorEventListener {
                 notifyUi()
             }
             "find" -> main.post { ring(m.getBoolean("on")) }
+            "prefs" -> prefs.edit().putBoolean(PREF_DISCONNECT_ALERT, m.optBoolean("disconnectAlert")).apply()
             "health_ack" -> {
                 val upTo = m.getLong("ts")
                 synchronized(pending) {
@@ -438,8 +466,9 @@ class LinkService : Service(), SensorEventListener {
         if (state != State.PAIRING || !localOk || !remoteOk) return
         prefs.edit().putString(PREF_PEER, Base64.encodeToString(link.peerKey, Base64.NO_WRAP)).apply()
         pairCode = null
+        attachHub(link)
         setState(State.CONNECTED)
-        onConnected(link)
+        onConnected()
     }
 
     fun cancelPairing() {
@@ -487,7 +516,7 @@ class LinkService : Service(), SensorEventListener {
             builder.setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true)
             builder.addAction(
                 Notification.Action.Builder(
-                    null, "Sessize al", actionIntent(ActionReceiver.ACTION_PICK, key, ACTION_SILENCE, false),
+                    null, getString(R.string.cmp_silence), actionIntent(ActionReceiver.ACTION_PICK, key, ACTION_SILENCE, false),
                 ).build()
             )
         }
@@ -624,8 +653,8 @@ class LinkService : Service(), SensorEventListener {
             NOTIFICATION_FIND,
             Notification.Builder(this, CHANNEL_FIND)
                 .setSmallIcon(R.drawable.ic_w7link)
-                .setContentTitle("Telefon saati arıyor")
-                .setContentText("Susturmak için dokunun")
+                .setContentTitle(getString(R.string.cmp_ring_title))
+                .setContentText(getString(R.string.cmp_ring_text))
                 .setContentIntent(stop)
                 .setAutoCancel(true)
                 .build(),
@@ -644,16 +673,16 @@ class LinkService : Service(), SensorEventListener {
     }
 
     private fun notifyUi() {
-        main.post { uiListener?.invoke() }
+        main.post { uiListeners.forEach { it() } }
     }
 
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, CompanionActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_LINK)
             .setSmallIcon(R.drawable.ic_w7link)
-            .setContentTitle(statusText(state))
+            .setContentTitle(getString(statusText(state)))
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -665,6 +694,10 @@ class LinkService : Service(), SensorEventListener {
         private const val CHANNEL_MIRROR = "mirror"
         private const val CHANNEL_CALL = "call"
         private const val CHANNEL_FIND = "find"
+        private const val CHANNEL_ALERTS = "alerts"
+        private const val NOTIFICATION_LOST = 4
+        private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
+        private const val LOST_DELAY_MS = 20_000L
         private const val NOTIFICATION_LINK = 1
         private const val NOTIFICATION_FIND = 2
         const val NOTIFICATION_MIRROR = 3
@@ -686,9 +719,8 @@ class LinkService : Service(), SensorEventListener {
         @Volatile
         var instance: LinkService? = null
 
-        /** Invoked on the main thread whenever something the activity shows has changed. */
-        @Volatile
-        var uiListener: (() -> Unit)? = null
+        /** Invoked on the main thread whenever something the companion screens show has changed. */
+        val uiListeners = CopyOnWriteArraySet<() -> Unit>()
 
         fun hasPermissions(context: Context) =
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
@@ -705,11 +737,11 @@ class LinkService : Service(), SensorEventListener {
         }
 
         fun statusText(state: State) = when (state) {
-            State.NO_PERMISSION -> "Bluetooth izni gerekli"
-            State.BT_OFF -> "Bluetooth kapalı"
-            State.WAITING -> "Telefon bekleniyor"
-            State.PAIRING -> "Eşleştirme onayı"
-            State.CONNECTED -> "Telefona bağlı"
+            State.NO_PERMISSION -> R.string.cmp_state_no_permission
+            State.BT_OFF -> R.string.cmp_state_bt_off
+            State.WAITING -> R.string.cmp_state_waiting
+            State.PAIRING -> R.string.cmp_state_pairing
+            State.CONNECTED -> R.string.cmp_state_connected
         }
     }
 }
