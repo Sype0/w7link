@@ -2,7 +2,7 @@
 
 > **W7Link is an unofficial fork of [Heartline](https://github.com/selin2005/heartline).** This document comes from
 > Heartline and applies to this fork's health features as written, with two differences: where it says "Heartline",
-> read "W7Link", and this fork has no update check, so it makes no network requests at all. The Heartline project
+> read "W7Link", and this fork has no update check, so it makes no network requests of its own. When "Internet for the watch" is on, the phone app does open the connections the paired watch's apps ask for and passes their data along unread. The Heartline project
 > does not publish, support or endorse this build.
 
 **Version 2 · Effective 3 October 2026**

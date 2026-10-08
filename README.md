@@ -31,6 +31,8 @@ Heartline'dan farkları:
 - Telefon bildirimlerini saate aktarır; saatten kapatma, eylem seçme ve yanıt yazma
 - Gelen aramayı saatte gösterir; yanıtla / reddet / sessize al
 - Medya kontrolü (önceki, oynat-duraklat, sonraki, ses)
+- Saate telefondan APK kurma (Uygulamalar sekmesi)
+- Saate telefon üzerinden internet (HTTP/HTTPS; saatte bir VPN olarak açılır)
 - Telefonumu bul, saatimi bul, karşılıklı pil durumu, günlük adım
 
 Bunlar uygulamanın içindedir: telefonda **Ayarlar → Saat eşlikçisi**, saatte ana listedeki
