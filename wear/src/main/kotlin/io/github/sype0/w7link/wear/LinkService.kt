@@ -32,8 +32,12 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.AudioAttributes
+import android.media.MediaMetadata
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -122,6 +126,28 @@ class LinkService : Service(), SensorEventListener {
     private val pending = ArrayList<JSONObject>()
 
     private var ringtone: Ringtone? = null
+
+    /** The phone's playback as a session of this watch, which is what Samsung's Media Controller shows. */
+    private var session: MediaSession? = null
+    private var sessionVolume: VolumeProvider? = null
+
+    private val sessionCallback = object : MediaSession.Callback() {
+        override fun onPlay() {
+            if (media?.optBoolean("playing") != true) mediaCommand("play_pause")
+        }
+
+        override fun onPause() {
+            if (media?.optBoolean("playing") == true) mediaCommand("play_pause")
+        }
+
+        override fun onSkipToNext() {
+            mediaCommand("next")
+        }
+
+        override fun onSkipToPrevious() {
+            mediaCommand("prev")
+        }
+    }
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
@@ -226,6 +252,8 @@ class LinkService : Service(), SensorEventListener {
         main.removeCallbacksAndMessages(null)
         getSystemService(SensorManager::class.java).unregisterListener(this)
         ring(false)
+        session?.release()
+        session = null
         channel?.close()
         closeServer()
         stopAdvertising()
@@ -374,6 +402,7 @@ class LinkService : Service(), SensorEventListener {
             channel = null
             pairCode = null
             findingPhone = false
+            media = null
             try {
                 socket.close()
             } catch (_: IOException) {
@@ -432,6 +461,7 @@ class LinkService : Service(), SensorEventListener {
             "notif_rm" -> notifications.cancel(m.getString("key"), NOTIFICATION_MIRROR)
             "media" -> {
                 media = if (m.getBoolean("has")) m else null
+                main.post { publishMedia() }
                 notifyUi()
             }
             "battery" -> {
@@ -614,6 +644,53 @@ class LinkService : Service(), SensorEventListener {
 
     fun mediaCommand(command: String) = send(Proto.msg("media_cmd", "cmd" to command))
 
+    /** Mirrors [media] into the session, or drops the session when the phone has nothing or is gone. Main thread. */
+    private fun publishMedia() {
+        val now = media.takeIf { state == State.CONNECTED }
+        if (now == null) {
+            session?.release()
+            session = null
+            sessionVolume = null
+            return
+        }
+        val current = session ?: MediaSession(this, TAG).also {
+            it.setCallback(sessionCallback, main)
+            session = it
+        }
+        val max = now.optInt("volMax")
+        val volume = sessionVolume?.takeIf { it.maxVolume == max }
+            ?: object : VolumeProvider(VolumeProvider.VOLUME_CONTROL_RELATIVE, max, now.optInt("vol")) {
+                override fun onAdjustVolume(direction: Int) {
+                    if (direction > 0) mediaCommand("vol_up") else if (direction < 0) mediaCommand("vol_down")
+                }
+            }.also {
+                sessionVolume = it
+                current.setPlaybackToRemote(it)
+            }
+        volume.currentVolume = now.optInt("vol")
+        current.setMetadata(
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, now.optString("title"))
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, now.optString("artist"))
+                .build()
+        )
+        val playing = now.optBoolean("playing")
+        current.setPlaybackState(
+            PlaybackState.Builder()
+                .setActions(
+                    PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+                        PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                )
+                .setState(
+                    if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                    PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+                    if (playing) 1f else 0f,
+                )
+                .build()
+        )
+        current.isActive = true
+    }
+
     private fun sendBattery(intent: Intent) {
         val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
@@ -667,7 +744,10 @@ class LinkService : Service(), SensorEventListener {
     private fun setState(next: State) {
         state = next
         main.post {
-            if (instance === this) notifications.notify(NOTIFICATION_LINK, statusNotification())
+            if (instance === this) {
+                notifications.notify(NOTIFICATION_LINK, statusNotification())
+                publishMedia()
+            }
         }
         notifyUi()
     }

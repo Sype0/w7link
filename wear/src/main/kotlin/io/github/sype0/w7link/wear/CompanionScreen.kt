@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LinkOff
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -89,6 +90,8 @@ fun WatchCompanionScreen() {
     }
     LaunchedEffect(granted) { if (granted) LinkService.start(context) }
     val state = link?.state ?: LinkService.State.WAITING
+    // Samsung's own controller drives the session the link service publishes; the keys below stand in where it's missing.
+    val controller = remember { context.packageManager.getLaunchIntentForPackage(MEDIA_CONTROLLER) }
     val list = rememberTransformingLazyColumnState()
     ScreenScaffold(scrollState = list) { padding ->
         TransformingLazyColumn(state = list, contentPadding = padding) {
@@ -127,23 +130,27 @@ fun WatchCompanionScreen() {
                             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         )
                     }
-                    item {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            MediaKey(Icons.Rounded.SkipPrevious, R.string.cmp_prev) { link.mediaCommand("prev") }
-                            MediaKey(if (media?.optBoolean("playing") == true) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, R.string.cmp_play_pause) {
-                                link.mediaCommand("play_pause")
+                    if (controller != null) {
+                        item { Action(Icons.Rounded.MusicNote, stringResource(R.string.cmp_media_controls)) { context.startActivity(controller) } }
+                    } else {
+                        item {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                MediaKey(Icons.Rounded.SkipPrevious, R.string.cmp_prev) { link.mediaCommand("prev") }
+                                MediaKey(if (media?.optBoolean("playing") == true) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, R.string.cmp_play_pause) {
+                                    link.mediaCommand("play_pause")
+                                }
+                                MediaKey(Icons.Rounded.SkipNext, R.string.cmp_next) { link.mediaCommand("next") }
                             }
-                            MediaKey(Icons.Rounded.SkipNext, R.string.cmp_next) { link.mediaCommand("next") }
                         }
-                    }
-                    item {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            MediaKey(Icons.AutoMirrored.Rounded.VolumeDown, R.string.cmp_vol_down) { link.mediaCommand("vol_down") }
-                            MediaKey(Icons.AutoMirrored.Rounded.VolumeUp, R.string.cmp_vol_up) { link.mediaCommand("vol_up") }
+                        item {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                MediaKey(Icons.AutoMirrored.Rounded.VolumeDown, R.string.cmp_vol_down) { link.mediaCommand("vol_down") }
+                                MediaKey(Icons.AutoMirrored.Rounded.VolumeUp, R.string.cmp_vol_up) { link.mediaCommand("vol_up") }
+                            }
                         }
-                    }
-                    if (media != null) {
-                        item { Note(stringResource(R.string.cmp_volume, media.optInt("vol"), media.optInt("volMax"))) }
+                        if (media != null) {
+                            item { Note(stringResource(R.string.cmp_volume, media.optInt("vol"), media.optInt("volMax"))) }
+                        }
                     }
                     item {
                         Action(
@@ -168,6 +175,8 @@ fun WatchCompanionScreen() {
         }
     }
 }
+
+private const val MEDIA_CONTROLLER = "com.samsung.android.mediacontroller"
 
 @Composable
 private fun Note(text: String) = Text(

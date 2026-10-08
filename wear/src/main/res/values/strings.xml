@@ -471,4 +471,5 @@
     <string name="cmp_next">Next</string>
     <string name="cmp_vol_down">Volume down</string>
     <string name="cmp_vol_up">Volume up</string>
+    <string name="cmp_media_controls">Media controls</string>
 </resources>

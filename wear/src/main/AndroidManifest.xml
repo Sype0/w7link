@@ -33,6 +33,7 @@
     <queries>
         <package android:name="com.samsung.android.service.health" />
         <package android:name="com.google.android.wearable.healthservices" />
+        <package android:name="com.samsung.android.mediacontroller" />
     </queries>
 
     <application
