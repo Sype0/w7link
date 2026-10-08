@@ -42,7 +42,4 @@
     <string name="cmp_internet_on">Telefonun internetini kullan</string>
     <string name="cmp_internet_off">Telefon internetini kapat</string>
     <string name="cmp_internet_adb">Bu saat VPN izni soramıyor. Bir kez çalıştırın: adb shell appops set %1$s ACTIVATE_VPN allow</string>
-    <string name="cmp_battery_hint">Pil optimizasyonu kapalıyken bağlantı kalıcı bildirim istemez.</string>
-    <string name="cmp_battery_allow">Pil optimizasyonunu kapat</string>
-    <string name="cmp_battery_adb">Bu saat soramıyor. Bir kez çalıştırın: adb shell dumpsys deviceidle whitelist +%1$s</string>
 </resources>

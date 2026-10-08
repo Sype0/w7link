@@ -36,7 +36,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import android.os.ParcelUuid
 import android.util.Base64
 import android.util.Log
@@ -147,9 +146,6 @@ class LinkService : Service() {
     }
     private var lastBattery = ""
 
-    /** Whether the status notification is up, which it only is while it keeps the service alive. */
-    private var showing = false
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -178,20 +174,14 @@ class LinkService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val quiet = unrestricted(this)
-        // Anyone but a quiet start() may have promised the system a foreground service.
-        if (!quiet || intent != null && !intent.getBooleanExtra(EXTRA_QUIET, false)) {
-            try {
-                startForeground(NOTIFICATION_LINK, statusNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-            } catch (e: Exception) {
-                // Without the Bluetooth permissions the system refuses this service type.
-                Log.w(TAG, "cannot run in foreground", e)
-                stopSelf()
-                return START_NOT_STICKY
-            }
+        try {
+            startForeground(NOTIFICATION_LINK, statusNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        } catch (e: Exception) {
+            // Without the Bluetooth permissions the system refuses this service type.
+            Log.w(TAG, "cannot run in foreground", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
-        if (quiet) stopForeground(STOP_FOREGROUND_REMOVE)
-        showing = !quiet
         if (intent?.action == ACTION_FIND_STOP) findPhone(false)
         if (!registered) {
             registered = true
@@ -524,7 +514,7 @@ class LinkService : Service() {
     private fun setState(next: State) {
         state = next
         main.post {
-            if (instance === this && showing) notifications.notify(NOTIFICATION_LINK, statusNotification())
+            if (instance === this) notifications.notify(NOTIFICATION_LINK, statusNotification())
         }
         notifyUi()
     }
@@ -575,18 +565,10 @@ class LinkService : Service() {
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
-        private const val EXTRA_QUIET = "quiet"
-
-        /** Free of battery optimization the system leaves the service alone, so it runs without its notification. */
-        fun unrestricted(context: Context) =
-            context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
-
         fun start(context: Context) {
             if (!hasPermissions(context)) return
             try {
-                val quiet = unrestricted(context)
-                val intent = Intent(context, LinkService::class.java).putExtra(EXTRA_QUIET, quiet)
-                if (quiet) context.startService(intent) else context.startForegroundService(intent)
+                context.startForegroundService(Intent(context, LinkService::class.java))
             } catch (e: Exception) {
                 // Not allowed while the app is in the background; the next app open or boot starts it.
                 Log.w(TAG, "link service not started", e)

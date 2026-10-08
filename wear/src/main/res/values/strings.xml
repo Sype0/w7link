@@ -478,7 +478,4 @@
     <string name="cmp_internet_on">Use phone\'s internet</string>
     <string name="cmp_internet_off">Stop phone internet</string>
     <string name="cmp_internet_adb">This watch can\'t ask for VPN access. Run once: adb shell appops set %1$s ACTIVATE_VPN allow</string>
-    <string name="cmp_battery_hint">Without battery optimization the link needs no permanent notification.</string>
-    <string name="cmp_battery_allow">Turn off battery optimization</string>
-    <string name="cmp_battery_adb">This watch can\'t ask. Run once: adb shell dumpsys deviceidle whitelist +%1$s</string>
 </resources>
