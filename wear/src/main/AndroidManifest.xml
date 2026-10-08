@@ -31,6 +31,8 @@
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <!-- The local proxy behind the phone's internet; the watch app itself makes no network requests. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Asked for so the link can run without a permanent notification. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Installing an APK sent from the phone. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

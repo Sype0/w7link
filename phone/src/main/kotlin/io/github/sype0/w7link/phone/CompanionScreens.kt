@@ -6,6 +6,7 @@ package io.github.sype0.w7link.phone
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -116,6 +117,15 @@ fun CompanionLinkControls(onChanged: () -> Unit = {}) {
     }
     val state = link?.state
     LaunchedEffect(state) { onChanged() }
+    var unrestricted by remember { mutableStateOf(LinkService.unrestricted(context)) }
+    LifecycleResumeEffect(Unit) {
+        // Back from the system's question: a start now is what drops the notification.
+        if (LinkService.unrestricted(context) != unrestricted) {
+            unrestricted = !unrestricted
+            LinkService.start(context)
+        }
+        onPauseOrDispose {}
+    }
     when {
         !granted -> {
             Hint(stringResource(R.string.cmp_permission_hint))
@@ -140,6 +150,19 @@ fun CompanionLinkControls(onChanged: () -> Unit = {}) {
         state == LinkService.State.BT_OFF -> Hint(stringResource(R.string.cmp_state_bt_off))
         link?.paired != true -> Hint(stringResource(R.string.cmp_pair_hint))
         else -> Hint(stringResource(R.string.cmp_state_scanning))
+    }
+    if (granted && !unrestricted) {
+        VerticalGap(12)
+        Hint(stringResource(R.string.cmp_battery_hint))
+        VerticalGap(12)
+        TonalPillButton(
+            stringResource(R.string.cmp_battery_allow),
+            onClick = {
+                @Suppress("BatteryLife")
+                val ask = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+                runCatching { context.startActivity(ask) }
+            },
+        )
     }
 }
 

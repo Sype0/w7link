@@ -936,6 +936,8 @@
     <string name="cmp_grant_bluetooth">Allow Bluetooth</string>
     <string name="cmp_permission_hint">W7Link reaches the watch over Bluetooth. Allow it to find and connect to nearby devices.</string>
     <string name="cmp_pair_hint">Open W7Link on the watch. When the same code shows on both screens, confirm on both.</string>
+    <string name="cmp_battery_hint">Turn battery optimization off for W7Link and the link runs without its permanent notification.</string>
+    <string name="cmp_battery_allow">Turn off battery optimization</string>
     <string name="cmp_pair_compare">Does the watch show this code?</string>
     <string name="cmp_pair_confirm">The codes match</string>
     <string name="cmp_watch_battery">Watch battery %1$d%%</string>

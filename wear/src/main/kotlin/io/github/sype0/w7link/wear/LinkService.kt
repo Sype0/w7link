@@ -125,6 +125,9 @@ class LinkService : Service(), SensorEventListener {
     private var remoteOk = false
     private var registered = false
 
+    /** Whether the status notification is up, which it only is while it keeps the service alive. */
+    private var showing = false
+
     private var sampling = false
     private val pending = ArrayList<JSONObject>()
 
@@ -227,10 +230,14 @@ class LinkService : Service(), SensorEventListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!enterForeground()) {
+        val quiet = unrestricted(this)
+        // Anyone but a quiet start() may have promised the system a foreground service.
+        if ((!quiet || intent != null && !intent.getBooleanExtra(EXTRA_QUIET, false)) && !enterForeground()) {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (quiet) stopForeground(STOP_FOREGROUND_REMOVE)
+        showing = !quiet
         if (!registered) {
             registered = true
             registerReceiver(systemEvents, IntentFilter().apply {
@@ -404,6 +411,7 @@ class LinkService : Service(), SensorEventListener {
         } finally {
             if (state == State.CONNECTED) main.postDelayed(lostAlert, LOST_DELAY_MS)
             LinkHub.detach()
+            NetService.onLink(this, false)
             channel = null
             pairCode = null
             findingPhone = false
@@ -430,6 +438,7 @@ class LinkService : Service(), SensorEventListener {
 
     private fun onConnected() {
         send(Proto.msg("hello", "name" to Build.MODEL))
+        NetService.onLink(this, true)
         main.removeCallbacks(lostAlert)
         notifications.cancel(NOTIFICATION_LOST)
         main.post {
@@ -796,7 +805,7 @@ class LinkService : Service(), SensorEventListener {
         state = next
         main.post {
             if (instance === this) {
-                notifications.notify(NOTIFICATION_LINK, statusNotification())
+                if (showing) notifications.notify(NOTIFICATION_LINK, statusNotification())
                 publishMedia()
             }
         }
@@ -858,10 +867,18 @@ class LinkService : Service(), SensorEventListener {
             context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
+        private const val EXTRA_QUIET = "quiet"
+
+        /** Free of battery optimization the system leaves the service alone, so it runs without its notification. */
+        fun unrestricted(context: Context) =
+            context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
+
         fun start(context: Context) {
             if (!hasPermissions(context)) return
             try {
-                context.startForegroundService(Intent(context, LinkService::class.java))
+                val quiet = unrestricted(context)
+                val intent = Intent(context, LinkService::class.java).putExtra(EXTRA_QUIET, quiet)
+                if (quiet) context.startService(intent) else context.startForegroundService(intent)
             } catch (e: Exception) {
                 // Not allowed while the app is in the background; the next app open or boot starts it.
                 Log.w(TAG, "link service not started", e)

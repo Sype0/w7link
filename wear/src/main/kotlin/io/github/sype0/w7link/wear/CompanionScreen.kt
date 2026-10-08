@@ -5,7 +5,10 @@ package io.github.sype0.w7link.wear
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LinkOff
@@ -98,6 +102,14 @@ fun WatchCompanionScreen() {
     val vpnConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) NetService.start(context)
     }
+    var unrestricted by remember { mutableStateOf(LinkService.unrestricted(context)) }
+    // The same goes for the battery question; either way the answer is read when its screen closes.
+    var batteryBlocked by remember { mutableStateOf(false) }
+    val batteryConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        unrestricted = LinkService.unrestricted(context)
+        // A start now is what drops the notification.
+        if (unrestricted) LinkService.start(context)
+    }
     // Wear OS may have no screen to ask for VPN access on; then only adb can grant it.
     var vpnBlocked by remember { mutableStateOf(false) }
     val list = rememberTransformingLazyColumnState()
@@ -174,8 +186,10 @@ fun WatchCompanionScreen() {
                             primary = NetService.running,
                         ) {
                             if (NetService.running) {
+                                NetService.setWanted(context, false)
                                 NetService.stop(context)
                             } else {
+                                NetService.setWanted(context, true)
                                 try {
                                     val consent = VpnService.prepare(context)
                                     if (consent == null) NetService.start(context) else vpnConsent.launch(consent)
@@ -187,6 +201,24 @@ fun WatchCompanionScreen() {
                     }
                     if (vpnBlocked) {
                         item { Note(stringResource(R.string.cmp_internet_adb, context.packageName)) }
+                    }
+                    if (!unrestricted) {
+                        item { Note(stringResource(R.string.cmp_battery_hint)) }
+                        item {
+                            Action(Icons.Rounded.BatterySaver, stringResource(R.string.cmp_battery_allow)) {
+                                try {
+                                    @Suppress("BatteryLife")
+                                    batteryConsent.launch(
+                                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+                                    )
+                                } catch (e: Exception) {
+                                    batteryBlocked = true
+                                }
+                            }
+                        }
+                        if (batteryBlocked) {
+                            item { Note(stringResource(R.string.cmp_battery_adb, context.packageName)) }
+                        }
                     }
                     item { Note(stringResource(R.string.cmp_steps_today, link.stepsToday)) }
                     item { Action(Icons.Rounded.LinkOff, stringResource(R.string.cmp_unpair)) { link.unpair() } }

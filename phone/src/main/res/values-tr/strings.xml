@@ -12,6 +12,8 @@
     <string name="cmp_grant_bluetooth">Bluetooth izni ver</string>
     <string name="cmp_permission_hint">W7Link saate Bluetooth üzerinden ulaşır. Yakındaki cihazları bulup bağlanmasına izin verin.</string>
     <string name="cmp_pair_hint">Saatte W7Link\'i açın. İki ekranda aynı kod çıkınca ikisinde de onaylayın.</string>
+    <string name="cmp_battery_hint">W7Link için pil optimizasyonunu kapatın; bağlantı kalıcı bildirim olmadan çalışır.</string>
+    <string name="cmp_battery_allow">Pil optimizasyonunu kapat</string>
     <string name="cmp_pair_compare">Saatte de bu kod mu görünüyor?</string>
     <string name="cmp_pair_confirm">Kodlar aynı</string>
     <string name="cmp_watch_battery">Saat pili %%%1$d</string>

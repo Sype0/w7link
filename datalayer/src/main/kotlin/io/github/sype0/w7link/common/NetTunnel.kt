@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -22,16 +24,22 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
- * TCP connections carried over the link, so the watch can use the phone's internet. The watch
- * (entry side) asks with [open]; the phone (exit side) connects out when its [exit] agrees. A frame
- * is a connection id, an operation and its bytes, sent through [sendFrame].
+ * TCP connections and DNS lookups carried over the link, so the watch can use the phone's internet.
+ * The watch (entry side) asks with [open] and [resolve]; the phone (exit side) connects out when
+ * its [exit] agrees and looks names up at its [resolver]. A frame is an id, an operation and its
+ * bytes, sent through [sendFrame].
  */
 class NetTunnel(private val sendFrame: (ByteArray) -> Boolean) {
     /** Whether this end connects to an address for the peer; null (the default) refuses everything. */
     @Volatile
     var exit: ((InetAddress) -> Boolean)? = null
 
+    /** Exit side: the DNS server lookups are sent to; null (the default) leaves them unanswered. */
+    @Volatile
+    var resolver: (() -> InetAddress?)? = null
+
     private val pipes = ConcurrentHashMap<Int, Pipe>()
+    private val lookups = ConcurrentHashMap<Int, (ByteArray) -> Unit>()
     private val opening = ConcurrentHashMap<Int, CompletableFuture<Boolean>>()
     private val nextId = AtomicInteger()
 
@@ -46,6 +54,30 @@ class NetTunnel(private val sendFrame: (ByteArray) -> Boolean) {
             FAILED -> opening.remove(id)?.complete(false)
             DATA -> pipes[id]?.offer(payload)
             CLOSE -> pipes[id]?.finish()
+            DNS -> thread(name = "w7link-net-dns", isDaemon = true) { lookUp(id, payload) }
+            DNS_REPLY -> lookups.remove(id)?.invoke(payload)
+        }
+    }
+
+    /** Entry side: sends a DNS [query] to the peer's resolver; [onReply] gets the answer, on the link's thread, if one comes. */
+    fun resolve(query: ByteArray, onReply: (ByteArray) -> Unit) {
+        // Unanswered lookups are the client's to retry; they only must not pile up here.
+        if (lookups.size >= MAX_LOOKUPS) lookups.clear()
+        val id = nextId.incrementAndGet()
+        lookups[id] = onReply
+        if (!send(id, DNS, query)) lookups.remove(id)
+    }
+
+    private fun lookUp(id: Int, query: ByteArray) {
+        runCatching {
+            val server = resolver?.invoke() ?: return
+            DatagramSocket().use { socket ->
+                socket.soTimeout = DNS_TIMEOUT_MS
+                socket.send(DatagramPacket(query, query.size, server, DNS_PORT))
+                val reply = DatagramPacket(ByteArray(MAX_DNS), MAX_DNS)
+                socket.receive(reply)
+                send(id, DNS_REPLY, reply.data, reply.length)
+            }
         }
     }
 
@@ -73,6 +105,7 @@ class NetTunnel(private val sendFrame: (ByteArray) -> Boolean) {
         pipes.values.toList().forEach { it.close(false) }
         opening.values.toList().forEach { it.complete(false) }
         opening.clear()
+        lookups.clear()
     }
 
     private fun connectOut(id: Int, target: String) {
@@ -162,6 +195,12 @@ class NetTunnel(private val sendFrame: (ByteArray) -> Boolean) {
         const val FAILED = 3
         const val DATA = 4
         const val CLOSE = 5
+        const val DNS = 6
+        const val DNS_REPLY = 7
+        const val DNS_PORT = 53
+        const val DNS_TIMEOUT_MS = 5_000
+        const val MAX_DNS = 4096
+        const val MAX_LOOKUPS = 256
         const val HEADER = 5
         const val CHUNK = 16 * 1024
         const val QUEUE = 64
