@@ -41,6 +41,8 @@
     <string name="cmp_opt_ongoing_sub">Zamanlayıcı ve navigasyon gibi kalıcı olanları da aktar</string>
     <string name="cmp_opt_media">Medya kontrolü</string>
     <string name="cmp_opt_media_sub">Çalmayı ve sesi saatten yönet</string>
+    <string name="cmp_opt_internet">Saate internet</string>
+    <string name="cmp_opt_internet_sub">Saat bu telefon üzerinden internete çıksın</string>
     <string name="cmp_ring_watch">Saati çaldır</string>
     <string name="cmp_stop_ring">Saati sustur</string>
     <string name="cmp_opt_low_battery">Saat pili düşük</string>

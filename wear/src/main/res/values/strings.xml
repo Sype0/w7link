@@ -474,4 +474,7 @@
     <string name="cmp_media_controls">Media controls</string>
     <string name="cmp_install_title">Install app from phone</string>
     <string name="cmp_install_text">Tap to confirm</string>
+    <string name="cmp_internet_on">Use phone\'s internet</string>
+    <string name="cmp_internet_off">Stop phone internet</string>
+    <string name="cmp_internet_adb">This watch can\'t ask for VPN access. Run once: adb shell appops set %1$s ACTIVATE_VPN allow</string>
 </resources>

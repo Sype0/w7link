@@ -43,6 +43,9 @@ object Proto {
     const val KIND_ENVELOPE = 1
     const val KIND_STREAM = 2
 
+    /** A [NetTunnel] frame. */
+    const val KIND_NET = 3
+
     /** An APK for the watch to install: its size as a long, then its bytes. */
     const val APK_STREAM = "/w7link/apk"
 

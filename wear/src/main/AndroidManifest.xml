@@ -29,6 +29,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <!-- The local proxy behind the phone's internet; the watch app itself makes no network requests. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Installing an APK sent from the phone. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -501,6 +503,15 @@
         <receiver
             android:name="io.github.sype0.w7link.wear.ActionReceiver"
             android:exported="false" />
+
+        <service
+            android:name="io.github.sype0.w7link.wear.NetService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name="io.github.sype0.w7link.wear.InstallReceiver"

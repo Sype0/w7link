@@ -163,6 +163,8 @@ class LinkService : Service() {
             NotificationChannel(CHANNEL_ALERTS, getString(R.string.cmp_channel_alerts), NotificationManager.IMPORTANCE_DEFAULT)
         )
         media = MediaBridge(this, main) { send(it) }
+        // The watch's connections go out from here, but never back into this phone itself.
+        LinkHub.net.exit = { CompanionPref.INTERNET.get(this) && !it.isLoopbackAddress && !it.isAnyLocalAddress }
         instance = this
     }
 
@@ -192,6 +194,7 @@ class LinkService : Service() {
 
     override fun onDestroy() {
         instance = null
+        LinkHub.net.exit = null
         if (registered) unregisterReceiver(systemEvents)
         main.removeCallbacksAndMessages(null)
         stopScan()

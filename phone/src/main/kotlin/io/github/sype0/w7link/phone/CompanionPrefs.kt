@@ -16,6 +16,7 @@ enum class CompanionPref(private val key: String, private val default: Boolean) 
     INCLUDE_SILENT("opt_silent", false),
     INCLUDE_ONGOING("opt_ongoing", false),
     MEDIA("opt_media", true),
+    INTERNET("opt_internet", true),
     LOW_BATTERY_ALERT("opt_low_battery", true),
 
     /** Applied on the watch; the phone sends it over whenever it changes. */

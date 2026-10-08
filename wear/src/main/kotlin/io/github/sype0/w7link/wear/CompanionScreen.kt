@@ -4,6 +4,8 @@
 package io.github.sype0.w7link.wear
 
 import android.Manifest
+import android.app.Activity
+import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.runtime.Composable
@@ -92,6 +95,11 @@ fun WatchCompanionScreen() {
     val state = link?.state ?: LinkService.State.WAITING
     // Samsung's own controller drives the session the link service publishes; the keys below stand in where it's missing.
     val controller = remember { context.packageManager.getLaunchIntentForPackage(MEDIA_CONTROLLER) }
+    val vpnConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == Activity.RESULT_OK) NetService.start(context)
+    }
+    // Wear OS may have no screen to ask for VPN access on; then only adb can grant it.
+    var vpnBlocked by remember { mutableStateOf(false) }
     val list = rememberTransformingLazyColumnState()
     ScreenScaffold(scrollState = list) { padding ->
         TransformingLazyColumn(state = list, contentPadding = padding) {
@@ -158,6 +166,27 @@ fun WatchCompanionScreen() {
                             stringResource(if (link.findingPhone) R.string.cmp_stop_find else R.string.cmp_find_phone),
                             primary = link.findingPhone,
                         ) { link.findPhone(!link.findingPhone) }
+                    }
+                    item {
+                        Action(
+                            Icons.Rounded.Public,
+                            stringResource(if (NetService.running) R.string.cmp_internet_off else R.string.cmp_internet_on),
+                            primary = NetService.running,
+                        ) {
+                            if (NetService.running) {
+                                NetService.stop(context)
+                            } else {
+                                try {
+                                    val consent = VpnService.prepare(context)
+                                    if (consent == null) NetService.start(context) else vpnConsent.launch(consent)
+                                } catch (e: Exception) {
+                                    vpnBlocked = true
+                                }
+                            }
+                        }
+                    }
+                    if (vpnBlocked) {
+                        item { Note(stringResource(R.string.cmp_internet_adb, context.packageName)) }
                     }
                     item { Note(stringResource(R.string.cmp_steps_today, link.stepsToday)) }
                     item { Action(Icons.Rounded.LinkOff, stringResource(R.string.cmp_unpair)) { link.unpair() } }

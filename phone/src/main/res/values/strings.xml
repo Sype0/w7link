@@ -965,6 +965,8 @@
     <string name="cmp_opt_ongoing_sub">Also forward ones that stay, like timers and navigation</string>
     <string name="cmp_opt_media">Media controls</string>
     <string name="cmp_opt_media_sub">Control playback and volume from the watch</string>
+    <string name="cmp_opt_internet">Internet for the watch</string>
+    <string name="cmp_opt_internet_sub">Let the watch go online through this phone</string>
     <string name="cmp_ring_watch">Ring the watch</string>
     <string name="cmp_stop_ring">Stop ringing</string>
     <string name="cmp_opt_low_battery">Watch battery low</string>

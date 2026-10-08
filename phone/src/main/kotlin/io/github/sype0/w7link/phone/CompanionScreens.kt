@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsPaused
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -248,6 +249,7 @@ fun CompanionScreen(onBack: (() -> Unit)? = null, onApps: () -> Unit = {}, listS
                 PrefRow(CompanionPref.MEDIA, Icons.Rounded.MusicNote, R.string.cmp_opt_media, R.string.cmp_opt_media_sub) {
                     LinkService.instance?.media?.push(true)
                 }
+                PrefRow(CompanionPref.INTERNET, Icons.Rounded.Public, R.string.cmp_opt_internet, R.string.cmp_opt_internet_sub)
                 PrefRow(CompanionPref.LOW_BATTERY_ALERT, Icons.Rounded.BatteryAlert, R.string.cmp_opt_low_battery, R.string.cmp_opt_low_battery_sub)
                 PrefRow(CompanionPref.DISCONNECT_ALERT, Icons.Rounded.Vibration, R.string.cmp_opt_disconnect, R.string.cmp_opt_disconnect_sub, divider = false) {
                     LinkService.instance?.sendPrefs()

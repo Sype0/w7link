@@ -39,6 +39,9 @@ object LinkHub {
     @Volatile
     var receiver: Receiver? = null
 
+    /** The watch's internet through the phone: TCP connections carried as [Proto.KIND_NET] frames. */
+    val net = NetTunnel { sendFrame(Proto.KIND_NET, it) }
+
     /** Streams the companion takes itself, by path; like [Receiver.onStream], each runs on the link's thread. */
     val streamRoutes = ConcurrentHashMap<String, (InputStream) -> Unit>()
 
@@ -73,6 +76,7 @@ object LinkHub {
     fun detach() {
         sender = null
         peerName = null
+        net.closeAll()
         inbound.values.forEach { it.abort() }
         inbound.clear()
         opens.values.forEach { it.complete(false) }
@@ -146,6 +150,7 @@ object LinkHub {
                 val path = input.readUTF()
                 receiver?.onMessage(path, input.readBytes())
             }
+            Proto.KIND_NET -> net.onFrame(body)
             Proto.KIND_STREAM -> {
                 val id = input.readInt()
                 val flags = input.readUnsignedByte()
