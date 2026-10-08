@@ -461,6 +461,7 @@
     <string name="cmp_channel_call">Calls</string>
     <string name="cmp_channel_find">Find my watch</string>
     <string name="cmp_channel_alerts">Phone alerts</string>
+    <string name="cmp_channel_media">Phone media</string>
     <string name="cmp_ring_title">The phone is looking for this watch</string>
     <string name="cmp_ring_text">Tap to stop</string>
     <string name="cmp_silence">Silence</string>

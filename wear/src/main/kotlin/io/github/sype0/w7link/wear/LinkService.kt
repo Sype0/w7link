@@ -222,6 +222,9 @@ class LinkService : Service(), SensorEventListener {
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERTS, getString(R.string.cmp_channel_alerts), NotificationManager.IMPORTANCE_HIGH)
         )
+        notifications.createNotificationChannel(
+            NotificationChannel(CHANNEL_MEDIA, getString(R.string.cmp_channel_media), NotificationManager.IMPORTANCE_LOW)
+        )
         JSONArray(prefs.getString(PREF_PENDING, null) ?: "[]").let { saved ->
             for (i in 0 until saved.length()) pending.add(saved.getJSONObject(i))
         }
@@ -264,6 +267,7 @@ class LinkService : Service(), SensorEventListener {
         main.removeCallbacksAndMessages(null)
         getSystemService(SensorManager::class.java).unregisterListener(this)
         ring(false)
+        notifications.cancel(NOTIFICATION_MEDIA)
         session?.release()
         session = null
         channel?.close()
@@ -662,13 +666,16 @@ class LinkService : Service(), SensorEventListener {
     private fun publishMedia() {
         val now = media.takeIf { state == State.CONNECTED }
         if (now == null) {
+            notifications.cancel(NOTIFICATION_MEDIA)
             session?.release()
             session = null
             sessionVolume = null
             return
         }
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val current = session ?: MediaSession(this, TAG).also {
             it.setCallback(sessionCallback, main)
+            it.setSessionActivity(open)
             session = it
         }
         val max = now.optInt("volMax")
@@ -703,6 +710,20 @@ class LinkService : Service(), SensorEventListener {
                 .build()
         )
         current.isActive = true
+        // The system's own media surfaces go by this notification; its buttons come from the session.
+        notifications.notify(
+            NOTIFICATION_MEDIA,
+            Notification.Builder(this, CHANNEL_MEDIA)
+                .setSmallIcon(R.drawable.ic_w7link)
+                .setContentTitle(now.optString("title"))
+                .setContentText(now.optString("artist"))
+                .setContentIntent(open)
+                .setStyle(Notification.MediaStyle().setMediaSession(current.sessionToken))
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setOngoing(playing)
+                .setOnlyAlertOnce(true)
+                .build(),
+        )
     }
 
     // --- apps from the phone ---
@@ -837,6 +858,8 @@ class LinkService : Service(), SensorEventListener {
         private const val CHANNEL_ALERTS = "alerts"
         private const val NOTIFICATION_LOST = 4
         private const val NOTIFICATION_INSTALL = 5
+        private const val NOTIFICATION_MEDIA = 6
+        private const val CHANNEL_MEDIA = "media"
         private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
         private const val LOST_DELAY_MS = 20_000L
         private const val NOTIFICATION_LINK = 1

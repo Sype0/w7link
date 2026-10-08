@@ -25,6 +25,7 @@
     <string name="cmp_channel_call">Aramalar</string>
     <string name="cmp_channel_find">Saatimi bul</string>
     <string name="cmp_channel_alerts">Telefon uyarıları</string>
+    <string name="cmp_channel_media">Telefonda çalan</string>
     <string name="cmp_ring_title">Telefon bu saati arıyor</string>
     <string name="cmp_ring_text">Susturmak için dokunun</string>
     <string name="cmp_silence">Sessize al</string>
