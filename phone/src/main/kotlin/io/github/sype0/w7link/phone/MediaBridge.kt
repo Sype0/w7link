@@ -65,7 +65,8 @@ class MediaBridge(
     }
 
     override fun onActiveSessionsChanged(controllers: MutableList<MediaController>?) {
-        val next = controllers?.firstOrNull()
+        // The one playing, else the most recent; the system lists them by priority.
+        val next = controllers?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: controllers?.firstOrNull()
         if (next?.sessionToken != current?.sessionToken) {
             current?.unregisterCallback(callback)
             current = next
@@ -85,6 +86,11 @@ class MediaBridge(
     fun push(force: Boolean) {
         val controller = current.takeIf { CompanionPref.MEDIA.get(context) }
         val meta = controller?.metadata
+        // Players differ in which keys they fill; the description falls back through them.
+        val description = meta?.description
+        val title = meta?.text(MediaMetadata.METADATA_KEY_TITLE) ?: description?.title?.toString().orEmpty()
+        val artist = meta?.text(MediaMetadata.METADATA_KEY_ARTIST) ?: meta?.text(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?: description?.subtitle?.toString().orEmpty()
         val playback = controller?.playbackState
         val playing = playback?.state == PlaybackState.STATE_PLAYING
         // Where playback is now, not where it was when the player last reported.
@@ -96,8 +102,8 @@ class MediaBridge(
         val message = Proto.msg(
             "media",
             "has" to (controller != null),
-            "title" to (meta?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""),
-            "artist" to (meta?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""),
+            "title" to title,
+            "artist" to artist,
             "playing" to playing,
             "dur" to (meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
             "pos" to position,
@@ -116,6 +122,8 @@ class MediaBridge(
         lastSpeed = if (playing) playback?.playbackSpeed ?: 1f else 0f
         send(message)
     }
+
+    private fun MediaMetadata.text(key: String): String? = getString(key)?.takeIf { it.isNotBlank() }
 
     /** The playing item and the ones after it, as many as fit a message comfortably. */
     private fun upNext(queue: List<MediaSession.QueueItem>?, active: Long): JSONArray {
