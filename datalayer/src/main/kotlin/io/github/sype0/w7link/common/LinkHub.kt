@@ -39,6 +39,9 @@ object LinkHub {
     @Volatile
     var receiver: Receiver? = null
 
+    /** Streams the companion takes itself, by path; like [Receiver.onStream], each runs on the link's thread. */
+    val streamRoutes = ConcurrentHashMap<String, (InputStream) -> Unit>()
+
     /** The other device's model name, once it has said hello. */
     @Volatile
     var peerName: String? = null
@@ -150,7 +153,8 @@ object LinkHub {
                     val path = input.readUTF()
                     val stream = ChunkStream()
                     inbound[id] = stream
-                    receiver?.onStream(path, stream) ?: stream.abort()
+                    val route = streamRoutes[path]
+                    if (route != null) route(stream) else receiver?.onStream(path, stream) ?: stream.abort()
                 }
                 val stream = inbound[id] ?: return
                 val delivered = stream.offer(input.readBytes())

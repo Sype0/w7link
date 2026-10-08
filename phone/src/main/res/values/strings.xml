@@ -992,5 +992,13 @@
     <string name="cmp_dark_off">Light</string>
     <string name="cmp_dark_on">Dark</string>
     <string name="cmp_apps_loading">Loading apps…</string>
+    <string name="cmp_tab_apps">Apps</string>
+    <string name="cmp_apk_hint">Choose an APK on this phone and the watch installs it. The watch asks you to confirm.</string>
+    <string name="cmp_apk_needs_watch">Connect the watch to install apps on it.</string>
+    <string name="cmp_apk_pick">Choose APK</string>
+    <string name="cmp_apk_sending">Sending %1$s… %2$d%%</string>
+    <string name="cmp_apk_confirm">%1$s is on the watch. Confirm the install there.</string>
+    <string name="cmp_apk_done">%1$s is installed on the watch.</string>
+    <string name="cmp_apk_failed">Couldn\'t install %1$s. %2$s</string>
     <string name="listener_label">W7Link notification forwarding</string>
 </resources>

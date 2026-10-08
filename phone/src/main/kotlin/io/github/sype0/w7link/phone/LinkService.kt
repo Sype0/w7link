@@ -365,6 +365,7 @@ class LinkService : Service() {
                 notifyUi()
             }
             "find_phone" -> main.post { findPhone(m.getBoolean("on")) }
+            "apk_result" -> ApkInstall.onResult(m.optBoolean("ok"), m.optString("message"))
         }
     }
 

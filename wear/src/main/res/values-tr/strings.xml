@@ -36,4 +36,6 @@
     <string name="cmp_vol_down">Sesi kıs</string>
     <string name="cmp_vol_up">Sesi aç</string>
     <string name="cmp_media_controls">Medya denetimleri</string>
+    <string name="cmp_install_title">Telefondan uygulama kur</string>
+    <string name="cmp_install_text">Onaylamak için dokunun</string>
 </resources>

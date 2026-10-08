@@ -24,6 +24,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
@@ -59,7 +60,9 @@ import io.github.sype0.w7link.common.Proto
 import io.github.sype0.w7link.common.SecureChannel
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.DataInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.security.KeyPair
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -219,6 +222,7 @@ class LinkService : Service(), SensorEventListener {
         JSONArray(prefs.getString(PREF_PENDING, null) ?: "[]").let { saved ->
             for (i in 0 until saved.length()) pending.add(saved.getJSONObject(i))
         }
+        LinkHub.streamRoutes[Proto.APK_STREAM] = { input -> thread(name = "w7link-apk") { installApk(input) } }
         instance = this
     }
 
@@ -248,6 +252,7 @@ class LinkService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         instance = null
+        LinkHub.streamRoutes.remove(Proto.APK_STREAM)
         if (registered) unregisterReceiver(systemEvents)
         main.removeCallbacksAndMessages(null)
         getSystemService(SensorManager::class.java).unregisterListener(this)
@@ -691,6 +696,52 @@ class LinkService : Service(), SensorEventListener {
         current.isActive = true
     }
 
+    // --- apps from the phone ---
+
+    /** Feeds an APK the phone streams into an install session; [InstallReceiver] hears how it went. */
+    private fun installApk(input: InputStream) {
+        val installer = packageManager.packageInstaller
+        var id = -1
+        try {
+            input.use { raw ->
+                val data = DataInputStream(raw)
+                val size = data.readLong()
+                id = installer.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
+                installer.openSession(id).use { session ->
+                    session.openWrite("app.apk", 0, size).use { out ->
+                        data.copyTo(out)
+                        session.fsync(out)
+                    }
+                    val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                    session.commit(PendingIntent.getBroadcast(this, id, Intent(this, InstallReceiver::class.java), flags).intentSender)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "apk install", e)
+            if (id >= 0) runCatching { installer.abandonSession(id) }
+            installResult(false, e.message.orEmpty())
+        }
+    }
+
+    /** The system's install question, kept as a notification for when it can't open by itself. */
+    fun askInstall(confirm: Intent) {
+        notifications.notify(
+            NOTIFICATION_INSTALL,
+            Notification.Builder(this, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_w7link)
+                .setContentTitle(getString(R.string.cmp_install_title))
+                .setContentText(getString(R.string.cmp_install_text))
+                .setContentIntent(PendingIntent.getActivity(this, 0, confirm, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    fun installResult(ok: Boolean, message: String) {
+        notifications.cancel(NOTIFICATION_INSTALL)
+        send(Proto.msg("apk_result", "ok" to ok, "message" to message))
+    }
+
     private fun sendBattery(intent: Intent) {
         val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
@@ -776,6 +827,7 @@ class LinkService : Service(), SensorEventListener {
         private const val CHANNEL_FIND = "find"
         private const val CHANNEL_ALERTS = "alerts"
         private const val NOTIFICATION_LOST = 4
+        private const val NOTIFICATION_INSTALL = 5
         private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
         private const val LOST_DELAY_MS = 20_000L
         private const val NOTIFICATION_LINK = 1

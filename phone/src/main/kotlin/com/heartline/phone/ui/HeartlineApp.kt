@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
@@ -131,6 +132,7 @@ object Routes {
     const val DIAGNOSTICS = "diagnostics"
     const val COMPANION = io.github.sype0.w7link.phone.LinkService.COMPANION_ROUTE
     const val COMPANION_APPS = "companion/apps"
+    const val WATCH_APPS = "watch_apps"
 
     fun doc(doc: BundledDoc) = "doc/${doc.route}"
 
@@ -144,6 +146,7 @@ private data class Tab(val route: String, val label: Int, val icon: ImageVector)
 private val tabs = listOf(
     Tab(Routes.HOME, R.string.tab_home, Icons.Rounded.Home),
     Tab(Routes.HISTORY, R.string.tab_history, Icons.Rounded.History),
+    Tab(Routes.WATCH_APPS, R.string.cmp_tab_apps, Icons.Rounded.Apps),
     Tab(Routes.SETTINGS, R.string.tab_settings, Icons.Rounded.Settings),
 )
 
@@ -421,6 +424,9 @@ fun HeartlineApp(
                 }
                 composable(Routes.COMPANION) {
                     io.github.sype0.w7link.phone.CompanionScreen(onBack = goBack, onApps = { navController.navigate(Routes.COMPANION_APPS) })
+                }
+                composable(Routes.WATCH_APPS) {
+                    io.github.sype0.w7link.phone.WatchAppsScreen()
                 }
                 composable(Routes.COMPANION_APPS) {
                     io.github.sype0.w7link.phone.CompanionAppsScreen(onBack = goBack)

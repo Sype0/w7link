@@ -472,4 +472,6 @@
     <string name="cmp_vol_down">Volume down</string>
     <string name="cmp_vol_up">Volume up</string>
     <string name="cmp_media_controls">Media controls</string>
+    <string name="cmp_install_title">Install app from phone</string>
+    <string name="cmp_install_text">Tap to confirm</string>
 </resources>

@@ -68,5 +68,13 @@
     <string name="cmp_dark_off">Açık</string>
     <string name="cmp_dark_on">Koyu</string>
     <string name="cmp_apps_loading">Uygulamalar yükleniyor…</string>
+    <string name="cmp_tab_apps">Uygulamalar</string>
+    <string name="cmp_apk_hint">Telefondan bir APK seçin, saat kursun. Saat sizden onay ister.</string>
+    <string name="cmp_apk_needs_watch">Saate uygulama kurmak için saati bağlayın.</string>
+    <string name="cmp_apk_pick">APK seç</string>
+    <string name="cmp_apk_sending">%1$s gönderiliyor… %%%2$d</string>
+    <string name="cmp_apk_confirm">%1$s saatte. Kurulumu saatte onaylayın.</string>
+    <string name="cmp_apk_done">%1$s saate kuruldu.</string>
+    <string name="cmp_apk_failed">%1$s kurulamadı. %2$s</string>
     <string name="listener_label">W7Link bildirim aktarımı</string>
 </resources>

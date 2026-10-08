@@ -43,6 +43,9 @@ object Proto {
     const val KIND_ENVELOPE = 1
     const val KIND_STREAM = 2
 
+    /** An APK for the watch to install: its size as a long, then its bytes. */
+    const val APK_STREAM = "/w7link/apk"
+
     fun msg(type: String, vararg fields: Pair<String, Any?>): JSONObject {
         val o = JSONObject().put("t", type)
         for ((k, v) in fields) o.put(k, v)

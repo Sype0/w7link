@@ -29,6 +29,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <!-- Installing an APK sent from the phone. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="com.samsung.android.service.health" />
@@ -498,6 +500,10 @@
 
         <receiver
             android:name="io.github.sype0.w7link.wear.ActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.github.sype0.w7link.wear.InstallReceiver"
             android:exported="false" />
 
         <receiver
