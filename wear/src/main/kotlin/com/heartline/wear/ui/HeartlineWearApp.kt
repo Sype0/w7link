@@ -107,7 +107,7 @@ private object Routes {
     const val DEV_MODE = "dev_mode"
     const val DIAGNOSTICS = "diagnostics"
     const val OPTIONS = "options/{metric}"
-    const val COMPANION = "companion"
+    const val MEDIA = MainActivity.ROUTE_MEDIA
 
     fun options(metric: Metric) = "options/${metric.name}"
 
@@ -121,7 +121,7 @@ private object Routes {
     }
 
     /** Screens the phone, notifications, tiles and complications may open. */
-    fun isExternal(route: String) = route in setOf(ECG, HEART_RATE, BLOOD_PRESSURE, BP_CALIBRATION, HISTORY) ||
+    fun isExternal(route: String) = route in setOf(ECG, HEART_RATE, BLOOD_PRESSURE, BP_CALIBRATION, HISTORY, MEDIA) ||
         (route.startsWith("quick/") && Metric.entries.any { route == quick(it) })
 }
 
@@ -282,28 +282,31 @@ private fun AppNavHost(nav: NavHostController, gate: SetupGateViewModel) {
     LaunchedEffect(Unit) { launcher.connect() }
     SwipeDismissableNavHost(navController = nav, startDestination = Routes.LAUNCHER) {
         composable(Routes.LAUNCHER) {
-            when (val state = launcherState) {
-                is LauncherState.Ready -> {
-                    // Decided once per visit to the launcher (and at most once a day per reason).
-                    val celebrate = remember(state.header.birthday, state.header.next) { launcher.celebrate(state.header) }
-                    LauncherScreen(
-                        state.entries,
-                        header = state.header,
-                        celebrate = celebrate,
-                        onOpen = { nav.navigate(Routes.measure(it)) },
-                        onOptions = { nav.navigate(Routes.options(it)) },
-                        onHistory = { nav.navigate(Routes.HISTORY) },
-                        onSettings = { nav.navigate(Routes.SETTINGS) },
-                        onPhone = { nav.navigate(Routes.COMPANION) },
-                    )
+            // Health, Media and Phone side by side; the sensors' state only concerns the Health page.
+            io.github.sype0.w7link.wear.HomePager {
+                when (val state = launcherState) {
+                    is LauncherState.Ready -> {
+                        // Decided once per visit to the launcher (and at most once a day per reason).
+                        val celebrate = remember(state.header.birthday, state.header.next) { launcher.celebrate(state.header) }
+                        LauncherScreen(
+                            state.entries,
+                            header = state.header,
+                            celebrate = celebrate,
+                            onOpen = { nav.navigate(Routes.measure(it)) },
+                            onOptions = { nav.navigate(Routes.options(it)) },
+                            onHistory = { nav.navigate(Routes.HISTORY) },
+                            onSettings = { nav.navigate(Routes.SETTINGS) },
+                        )
+                    }
+                    is LauncherState.Problem -> SensorErrorScreen(state.problem, onAction = {
+                        if (state.problem == SensorProblem.SDK_POLICY) nav.navigate(Routes.DEV_MODE) else launcher.connect()
+                    })
+                    LauncherState.Loading -> LauncherScreen(emptyList())
                 }
-                is LauncherState.Problem -> SensorErrorScreen(state.problem, onAction = {
-                    if (state.problem == SensorProblem.SDK_POLICY) nav.navigate(Routes.DEV_MODE) else launcher.connect()
-                })
-                LauncherState.Loading -> LauncherScreen(emptyList())
             }
         }
-        composable(Routes.COMPANION) { io.github.sype0.w7link.wear.WatchCompanionScreen() }
+        // Opened from the Now bar while the phone plays something.
+        composable(Routes.MEDIA) { io.github.sype0.w7link.wear.MediaScreen() }
         composable(Routes.ECG) { EcgFlow(onExit = exit) }
         composable(Routes.BLOOD_PRESSURE) {
             BpFlow(onExit = exit, onStartCalibration = { nav.openExternal(Routes.BP_CALIBRATION) })

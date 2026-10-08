@@ -33,13 +33,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.AudioAttributes
-import android.media.MediaDescription
-import android.media.MediaMetadata
 import android.media.Ringtone
 import android.media.RingtoneManager
-import android.media.VolumeProvider
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -53,6 +48,12 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Base64
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
+import com.heartline.datalayer.DeepLinks
+import com.heartline.shared.nav.EntryLinks
+import com.heartline.shared.nav.EntrySource
 import com.heartline.wear.MainActivity
 import com.heartline.wear.R
 import io.github.sype0.w7link.common.Keys
@@ -131,37 +132,6 @@ class LinkService : Service(), SensorEventListener {
 
     private var ringtone: Ringtone? = null
 
-    /** The phone's playback as a session of this watch, which is what Samsung's Media Controller shows. */
-    private var session: MediaSession? = null
-    private var sessionVolume: VolumeProvider? = null
-
-    private val sessionCallback = object : MediaSession.Callback() {
-        override fun onPlay() {
-            if (media?.optBoolean("playing") != true) mediaCommand("play_pause")
-        }
-
-        override fun onPause() {
-            if (media?.optBoolean("playing") == true) mediaCommand("play_pause")
-        }
-
-        override fun onSkipToNext() {
-            mediaCommand("next")
-        }
-
-        override fun onSkipToPrevious() {
-            mediaCommand("prev")
-        }
-
-        override fun onSeekTo(pos: Long) {
-            send(Proto.msg("media_cmd", "cmd" to "seek", "pos" to pos))
-        }
-
-        override fun onSkipToQueueItem(id: Long) {
-            // The phone reads the number as the item's id for this command.
-            send(Proto.msg("media_cmd", "cmd" to "queue", "pos" to id))
-        }
-    }
-
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
             Log.w(TAG, "advertise failed: $errorCode")
@@ -229,9 +199,8 @@ class LinkService : Service(), SensorEventListener {
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERTS, getString(R.string.cmp_channel_alerts), NotificationManager.IMPORTANCE_HIGH)
         )
-        notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_MEDIA, getString(R.string.cmp_channel_media), NotificationManager.IMPORTANCE_LOW)
-        )
+        // Older builds mirrored the playback as a media session with its own channel.
+        notifications.deleteNotificationChannel(CHANNEL_MEDIA)
         JSONArray(prefs.getString(PREF_PENDING, null) ?: "[]").let { saved ->
             for (i in 0 until saved.length()) pending.add(saved.getJSONObject(i))
         }
@@ -270,9 +239,6 @@ class LinkService : Service(), SensorEventListener {
         main.removeCallbacksAndMessages(null)
         getSystemService(SensorManager::class.java).unregisterListener(this)
         ring(false)
-        notifications.cancel(NOTIFICATION_MEDIA)
-        session?.release()
-        session = null
         channel?.close()
         closeServer()
         stopAdvertising()
@@ -482,7 +448,7 @@ class LinkService : Service(), SensorEventListener {
             "notif_rm" -> notifications.cancel(m.getString("key"), NOTIFICATION_MIRROR)
             "media" -> {
                 media = if (m.getBoolean("has")) m else null
-                main.post { publishMedia() }
+                main.post { refreshStatus() }
                 notifyUi()
             }
             "battery" -> {
@@ -665,91 +631,6 @@ class LinkService : Service(), SensorEventListener {
 
     fun mediaCommand(command: String) = send(Proto.msg("media_cmd", "cmd" to command))
 
-    /** Mirrors [media] into the session, or drops the session when the phone has nothing or is gone. Main thread. */
-    private fun publishMedia() {
-        val now = media.takeIf { state == State.CONNECTED }
-        if (now == null) {
-            notifications.cancel(NOTIFICATION_MEDIA)
-            session?.release()
-            session = null
-            sessionVolume = null
-            return
-        }
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val current = session ?: MediaSession(this, TAG).also {
-            it.setCallback(sessionCallback, main)
-            it.setSessionActivity(open)
-            session = it
-        }
-        val max = now.optInt("volMax")
-        val volume = sessionVolume?.takeIf { it.maxVolume == max }
-            ?: object : VolumeProvider(VolumeProvider.VOLUME_CONTROL_RELATIVE, max, now.optInt("vol")) {
-                override fun onAdjustVolume(direction: Int) {
-                    if (direction > 0) mediaCommand("vol_up") else if (direction < 0) mediaCommand("vol_down")
-                }
-            }.also {
-                sessionVolume = it
-                current.setPlaybackToRemote(it)
-            }
-        volume.currentVolume = now.optInt("vol")
-        current.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, now.optString("title"))
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, now.optString("artist"))
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, now.optLong("dur"))
-                .build()
-        )
-        val upNext = now.optJSONArray("queue")
-        current.setQueue(
-            if (upNext == null || upNext.length() == 0) {
-                null
-            } else {
-                List(upNext.length()) { i ->
-                    val item = upNext.getJSONObject(i)
-                    val description = MediaDescription.Builder()
-                        .setMediaId(item.optString("id"))
-                        .setTitle(item.optString("title"))
-                        .setSubtitle(item.optString("sub"))
-                        .build()
-                    MediaSession.QueueItem(description, item.optLong("id"))
-                }
-            }
-        )
-        val playing = now.optBoolean("playing")
-        current.setPlaybackState(
-            PlaybackState.Builder()
-                .setActions(
-                    PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        (if (now.optLong("dur") > 0) PlaybackState.ACTION_SEEK_TO else 0L) or
-                        (if (upNext != null && upNext.length() > 0) PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM else 0L)
-                )
-                .setActiveQueueItemId(now.optLong("queueAt", -1L))
-                .setState(
-                    if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                    // An older phone app sends no position.
-                    now.optLong("pos", PlaybackState.PLAYBACK_POSITION_UNKNOWN),
-                    if (playing) now.optDouble("speed", 1.0).toFloat() else 0f,
-                )
-                .build()
-        )
-        current.isActive = true
-        // The system's own media surfaces go by this notification; its buttons come from the session.
-        notifications.notify(
-            NOTIFICATION_MEDIA,
-            Notification.Builder(this, CHANNEL_MEDIA)
-                .setSmallIcon(R.drawable.ic_w7link)
-                .setContentTitle(now.optString("title"))
-                .setContentText(now.optString("artist"))
-                .setContentIntent(open)
-                .setStyle(Notification.MediaStyle().setMediaSession(current.sessionToken))
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
-                .setOngoing(playing)
-                .setOnlyAlertOnce(true)
-                .build(),
-        )
-    }
-
     // --- apps from the phone ---
 
     /** Feeds an APK the phone streams into an install session; [InstallReceiver] hears how it went. */
@@ -849,10 +730,7 @@ class LinkService : Service(), SensorEventListener {
     private fun setState(next: State) {
         state = next
         main.post {
-            if (instance === this) {
-                notifications.notify(NOTIFICATION_LINK, statusNotification())
-                publishMedia()
-            }
+            if (instance === this) refreshStatus()
         }
         notifyUi()
     }
@@ -861,16 +739,45 @@ class LinkService : Service(), SensorEventListener {
         main.post { uiListeners.forEach { it() } }
     }
 
+    /** Re-posts the link's notification: the state, and the phone's playback while it has one. Main thread. */
+    private fun refreshStatus() {
+        notifications.notify(NOTIFICATION_LINK, statusNotification())
+    }
+
+    /**
+     * The permanent notification of the link. While the phone plays something it also carries that
+     * as an ongoing activity, which the watch's Now bar shows and which opens this app's Media page.
+     */
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL_LINK)
+        val builder = NotificationCompat.Builder(this, CHANNEL_LINK)
             .setSmallIcon(R.drawable.ic_w7link)
             .setContentTitle(getString(statusText(state)))
             .setContentIntent(open)
             .setOngoing(true)
-            .build()
+        val playing = media.takeIf { state == State.CONNECTED }
+        if (playing != null) {
+            val track = listOf(playing.optString("title"), playing.optString("artist"))
+                .filter { it.isNotEmpty() }
+                .joinToString(" · ")
+                .ifEmpty { getString(R.string.cmp_media_title) }
+            // The data URI is what tells this PendingIntent apart from the plain one above.
+            val link = Uri.parse(DeepLinks.watch(EntryLinks.tag(MainActivity.ROUTE_MEDIA, EntrySource.NOTIFICATION)))
+            val openMedia = PendingIntent.getActivity(
+                this, 0, Intent(Intent.ACTION_VIEW, link, this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.setContentText(track).setContentIntent(openMedia)
+            OngoingActivity.Builder(this, NOTIFICATION_LINK, builder)
+                .setStaticIcon(R.drawable.ic_w7link)
+                .setTouchIntent(openMedia)
+                .setStatus(Status.forPart(Status.TextPart(track)))
+                .build()
+                .apply(this)
+        }
+        return builder.build()
     }
 
     companion object {
@@ -882,7 +789,6 @@ class LinkService : Service(), SensorEventListener {
         private const val CHANNEL_ALERTS = "alerts"
         private const val NOTIFICATION_LOST = 4
         private const val NOTIFICATION_INSTALL = 5
-        private const val NOTIFICATION_MEDIA = 6
         private const val CHANNEL_MEDIA = "media"
         private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
         private const val LOST_DELAY_MS = 20_000L

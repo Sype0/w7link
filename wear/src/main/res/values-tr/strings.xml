@@ -25,7 +25,6 @@
     <string name="cmp_channel_call">Aramalar</string>
     <string name="cmp_channel_find">Saatimi bul</string>
     <string name="cmp_channel_alerts">Telefon uyarıları</string>
-    <string name="cmp_channel_media">Telefonda çalan</string>
     <string name="cmp_ring_title">Telefon bu saati arıyor</string>
     <string name="cmp_ring_text">Susturmak için dokunun</string>
     <string name="cmp_silence">Sessize al</string>
@@ -36,7 +35,8 @@
     <string name="cmp_next">Sonraki</string>
     <string name="cmp_vol_down">Sesi kıs</string>
     <string name="cmp_vol_up">Sesi aç</string>
-    <string name="cmp_media_controls">Medya denetimleri</string>
+    <string name="cmp_media_title">Medya</string>
+    <string name="cmp_media_hint">Telefonda çalan burada görünür.</string>
     <string name="cmp_install_title">Telefondan uygulama kur</string>
     <string name="cmp_install_text">Onaylamak için dokunun</string>
     <string name="cmp_internet_on">Telefonun internetini kullan</string>

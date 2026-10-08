@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.PushPin
@@ -68,7 +67,8 @@ data class LauncherEntry(
 
 /**
  * The app's home: a greeting (with the user's name), today's check-ins, then the metrics the user
- * measures most (pinned ones first), History and Settings. Long-press a metric for more.
+ * measures most (pinned ones first), History and Settings. Long-press a metric for more. On the
+ * watch this is the Health page of the home; Media and Phone sit beside it.
  */
 @Composable
 fun LauncherScreen(
@@ -81,11 +81,9 @@ fun LauncherScreen(
     nowMs: Long = System.currentTimeMillis(),
     celebrate: Boolean = false,
     confettiFrameMs: Long? = null,
-    /** Opens the phone companion: media controls, find my phone, pairing. */
-    onPhone: () -> Unit = {},
 ) {
     Box(Modifier.fillMaxSize()) {
-        LauncherList(entries, header, onOpen, onOptions, onHistory, onSettings, nowMs, onPhone)
+        LauncherList(entries, header, onOpen, onOptions, onHistory, onSettings, nowMs)
         if (celebrate) {
             val vibrate = com.heartline.wear.ui.components.rememberBuzz(true)
             LaunchedEffect(Unit) { vibrate(com.heartline.wear.ui.components.Buzz.CELEBRATE) }
@@ -103,7 +101,6 @@ private fun LauncherList(
     onHistory: () -> Unit,
     onSettings: () -> Unit,
     nowMs: Long,
-    onPhone: () -> Unit,
 ) {
     val state = rememberTransformingLazyColumnState()
     val quick = header?.next ?: entries.firstOrNull()?.metric
@@ -133,9 +130,6 @@ private fun LauncherList(
             }
             entries.forEach { entry ->
                 item { MetricRow(entry, nowMs, onClick = { onOpen(entry.metric) }, onLongClick = { onOptions(entry.metric) }) }
-            }
-            item {
-                LauncherButton(androidx.compose.material.icons.Icons.Rounded.PhoneAndroid, WearColors.primary, stringResource(R.string.cmp_title), onPhone)
             }
             item {
                 LauncherButton(Icons.Rounded.History, WearColors.onSurfaceVariant, stringResource(R.string.history), onHistory)

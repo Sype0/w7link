@@ -461,7 +461,6 @@
     <string name="cmp_channel_call">Calls</string>
     <string name="cmp_channel_find">Find my watch</string>
     <string name="cmp_channel_alerts">Phone alerts</string>
-    <string name="cmp_channel_media">Phone media</string>
     <string name="cmp_ring_title">The phone is looking for this watch</string>
     <string name="cmp_ring_text">Tap to stop</string>
     <string name="cmp_silence">Silence</string>
@@ -472,7 +471,8 @@
     <string name="cmp_next">Next</string>
     <string name="cmp_vol_down">Volume down</string>
     <string name="cmp_vol_up">Volume up</string>
-    <string name="cmp_media_controls">Media controls</string>
+    <string name="cmp_media_title">Media</string>
+    <string name="cmp_media_hint">What the phone plays shows up here.</string>
     <string name="cmp_install_title">Install app from phone</string>
     <string name="cmp_install_text">Tap to confirm</string>
     <string name="cmp_internet_on">Use phone\'s internet</string>

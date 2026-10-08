@@ -124,6 +124,8 @@ dependencies {
     implementation(libs.wear.compose.foundation)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.wear.compose.navigation)
+    // The phone's playback in the watch's Now bar, opening this app.
+    implementation(libs.wear.ongoing)
     // Wear widgets (Wear OS 7 tile stack; shown as full-screen tiles on older watches).
     implementation(libs.glance.wear)
     implementation(libs.glance.wear.core)

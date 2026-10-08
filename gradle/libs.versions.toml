@@ -24,6 +24,7 @@ datastore = "1.2.1"
 koin = "4.1.1"
 concurrentFutures = "1.2.0"
 wearRemoteInteractions = "1.2.0"
+wearOngoing = "1.0.0"
 serialization = "1.10.0"
 coroutines = "1.10.2"
 junit = "4.13.2"
@@ -83,6 +84,7 @@ work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 wear-remote-interactions = { module = "androidx.wear:wear-remote-interactions", version.ref = "wearRemoteInteractions" }
+wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wearOngoing" }
 concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "concurrentFutures" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }

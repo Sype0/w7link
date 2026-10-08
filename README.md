@@ -35,8 +35,10 @@ Heartline'dan farkları:
 - Saate telefon üzerinden internet (TCP ve DNS; saatte bir VPN olarak, telefon bağlanınca kendiliğinden açılır)
 - Telefonumu bul, saatimi bul, karşılıklı pil durumu, günlük adım
 
-Bunlar uygulamanın içindedir: telefonda **Ayarlar → Saat eşlikçisi**, saatte ana listedeki
-**Telefon**. Hangi uygulamaların aktarılacağı, içeriği gizleme, yalnızca telefon kilitliyken
+Bunlar uygulamanın içindedir: telefonda **Ayarlar → Saat eşlikçisi**; saatte ana ekran yana
+kaydırılan üç sayfadır: **Sağlık** (Heartline'ın ölçümleri), **Medya** ve **Telefon**. Telefonda bir
+şey çalarken saatin Now bar'ında görünür; oradan dokununca W7Link'in Medya sayfası açılır (Samsung'un
+Medya Denetleyicisi kullanılmaz). Hangi uygulamaların aktarılacağı, içeriği gizleme, yalnızca telefon kilitliyken
 aktarma, Rahatsız Etmeyin'e uyma, sessiz ve kalıcı bildirimler, düşük saat pili ve telefon
 uzakta uyarıları oradan açılıp kapatılır.
 
