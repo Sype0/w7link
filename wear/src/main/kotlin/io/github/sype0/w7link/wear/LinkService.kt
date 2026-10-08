@@ -132,10 +132,6 @@ class LinkService : Service(), SensorEventListener {
 
     private var ringtone: Ringtone? = null
 
-    /** When the phone paused (elapsedRealtime), 0 while it plays; the Now bar entry lingers a little after a pause. */
-    private var pausedAt = 0L
-    private val dropPaused = Runnable { refreshStatus() }
-
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
             Log.w(TAG, "advertise failed: $errorCode")
@@ -452,17 +448,7 @@ class LinkService : Service(), SensorEventListener {
             "notif_rm" -> notifications.cancel(m.getString("key"), NOTIFICATION_MIRROR)
             "media" -> {
                 media = if (m.getBoolean("has")) m else null
-                main.post {
-                    val playing = media?.optBoolean("playing") == true
-                    if (playing || media == null) {
-                        pausedAt = 0L
-                        main.removeCallbacks(dropPaused)
-                    } else if (pausedAt == 0L) {
-                        pausedAt = SystemClock.elapsedRealtime()
-                        main.postDelayed(dropPaused, PAUSE_LINGER_MS)
-                    }
-                    refreshStatus()
-                }
+                main.post { refreshStatus() }
                 notifyUi()
             }
             "battery" -> {
@@ -762,9 +748,9 @@ class LinkService : Service(), SensorEventListener {
     }
 
     /**
-     * The permanent notification of the link. While the phone plays something (and for a little
-     * after a pause) it also carries that as an ongoing activity, which the watch's Now bar shows
-     * and which opens this app's Media page. Nothing of it stays once the music is off.
+     * The permanent notification of the link. While the phone actually plays something it also
+     * carries that as an ongoing activity, which the watch's Now bar shows and which opens this
+     * app's Media page. A pause drops it at once.
      */
     private fun statusNotification(): Notification {
         val open = PendingIntent.getActivity(
@@ -775,9 +761,8 @@ class LinkService : Service(), SensorEventListener {
             .setContentTitle(getString(statusText(state)))
             .setContentIntent(open)
             .setOngoing(true)
-        val playing = media.takeIf { state == State.CONNECTED }
-        val recent = pausedAt == 0L || SystemClock.elapsedRealtime() - pausedAt < PAUSE_LINGER_MS
-        if (playing != null && recent) {
+        val playing = media.takeIf { state == State.CONNECTED && it?.optBoolean("playing") == true }
+        if (playing != null) {
             val track = listOf(playing.optString("title"), playing.optString("artist"))
                 .filter { it.isNotEmpty() }
                 .joinToString(" · ")
@@ -811,7 +796,6 @@ class LinkService : Service(), SensorEventListener {
         private const val CHANNEL_MEDIA = "media"
         private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
         private const val LOST_DELAY_MS = 20_000L
-        private const val PAUSE_LINGER_MS = 3 * 60_000L
         private const val NOTIFICATION_LINK = 1
         private const val NOTIFICATION_FIND = 2
         const val NOTIFICATION_MIRROR = 3
