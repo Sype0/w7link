@@ -192,10 +192,14 @@ class LinkService : Service() {
             media.start()
         }
         startScan()
+        if (sysProxy == null && CompanionPref.INTERNET.get(this)) {
+            getSystemService(BluetoothManager::class.java).adapter?.takeIf { it.isEnabled }?.let { sysProxy = SysProxy(it).apply { start() } }
+        }
         return START_STICKY
     }
 
     private var registered = false
+    private var sysProxy: SysProxy? = null
 
     override fun onDestroy() {
         instance = null
@@ -204,6 +208,7 @@ class LinkService : Service() {
         if (registered) unregisterReceiver(systemEvents)
         main.removeCallbacksAndMessages(null)
         stopScan()
+        sysProxy?.stop()
         media.stop()
         findPhone(false)
         channel?.close()
