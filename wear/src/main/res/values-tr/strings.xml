@@ -37,6 +37,9 @@
     <string name="cmp_vol_up">Sesi aç</string>
     <string name="cmp_media_title">Medya</string>
     <string name="cmp_media_hint">Telefonda çalan burada görünür.</string>
+    <string name="cmp_queue">Sırada</string>
+    <string name="cmp_queue_now">Çalıyor</string>
+    <string name="cmp_queue_untitled">Adsız</string>
     <string name="cmp_install_title">Telefondan uygulama kur</string>
     <string name="cmp_install_text">Onaylamak için dokunun</string>
     <string name="cmp_internet_on">Telefonun internetini kullan</string>

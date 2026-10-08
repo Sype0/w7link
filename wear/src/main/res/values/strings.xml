@@ -473,6 +473,9 @@
     <string name="cmp_vol_up">Volume up</string>
     <string name="cmp_media_title">Media</string>
     <string name="cmp_media_hint">What the phone plays shows up here.</string>
+    <string name="cmp_queue">Up next</string>
+    <string name="cmp_queue_now">Playing</string>
+    <string name="cmp_queue_untitled">Untitled</string>
     <string name="cmp_install_title">Install app from phone</string>
     <string name="cmp_install_text">Tap to confirm</string>
     <string name="cmp_internet_on">Use phone\'s internet</string>

@@ -645,6 +645,9 @@ class LinkService : Service(), SensorEventListener {
 
     fun mediaCommand(command: String) = send(Proto.msg("media_cmd", "cmd" to command))
 
+    /** Jumps the phone to the queue item with [id] (the "id" of an entry in the media's "queue"). */
+    fun playQueueItem(id: Long) = send(Proto.msg("media_cmd", "cmd" to "queue", "pos" to id))
+
     // --- apps from the phone ---
 
     /** Feeds an APK the phone streams into an install session; [InstallReceiver] hears how it went. */
