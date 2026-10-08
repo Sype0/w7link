@@ -11,6 +11,7 @@ import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
+import android.os.SystemClock
 import android.view.KeyEvent
 import io.github.sype0.w7link.common.Proto
 import org.json.JSONObject
@@ -27,6 +28,9 @@ class MediaBridge(
     private var current: MediaController? = null
     private var started = false
     private var lastSent: String? = null
+    private var lastPosition = -1L
+    private var lastPositionAt = 0L
+    private var lastSpeed = 0f
 
     private val callback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = push(false)
@@ -78,23 +82,46 @@ class MediaBridge(
     fun push(force: Boolean) {
         val controller = current.takeIf { CompanionPref.MEDIA.get(context) }
         val meta = controller?.metadata
+        val playback = controller?.playbackState
+        val playing = playback?.state == PlaybackState.STATE_PLAYING
+        // Where playback is now, not where it was when the player last reported.
+        val position = when {
+            playback == null || playback.position < 0 -> -1L
+            playing -> playback.position + ((SystemClock.elapsedRealtime() - playback.lastPositionUpdateTime) * playback.playbackSpeed).toLong()
+            else -> playback.position
+        }
         val message = Proto.msg(
             "media",
             "has" to (controller != null),
             "title" to (meta?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""),
             "artist" to (meta?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""),
-            "playing" to (controller?.playbackState?.state == PlaybackState.STATE_PLAYING),
+            "playing" to playing,
+            "dur" to (meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
+            "pos" to position,
+            "speed" to (playback?.playbackSpeed?.toDouble() ?: 1.0),
             "vol" to audio.getStreamVolume(AudioManager.STREAM_MUSIC),
             "volMax" to audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
         )
-        val text = message.toString()
-        if (!force && text == lastSent) return
+        // The position moves by itself; it alone is no reason to send again.
+        val text = JSONObject(message.toString()).apply { remove("pos") }.toString() + (position < 0)
+        if (!force && text == lastSent && !positionJumped(position)) return
         lastSent = text
+        lastPosition = position
+        lastPositionAt = SystemClock.elapsedRealtime()
+        lastSpeed = if (playing) playback?.playbackSpeed ?: 1f else 0f
         send(message)
     }
 
-    fun command(cmd: String) {
+    /** True after a seek: the position is not where steady playback from the last one sent would be. */
+    private fun positionJumped(position: Long): Boolean {
+        if (position < 0 || lastPosition < 0) return false
+        val expected = lastPosition + ((SystemClock.elapsedRealtime() - lastPositionAt) * lastSpeed).toLong()
+        return kotlin.math.abs(position - expected) > SEEK_SLACK_MS
+    }
+
+    fun command(cmd: String, position: Long = 0) {
         when (cmd) {
+            "seek" -> current?.transportControls?.seekTo(position)
             // Media keys reach whichever app last played, even without an active session.
             "play_pause" -> key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "next" -> key(KeyEvent.KEYCODE_MEDIA_NEXT)
@@ -112,5 +139,9 @@ class MediaBridge(
     private fun volume(direction: Int) {
         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
         handler.post { push(false) }
+    }
+
+    private companion object {
+        const val SEEK_SLACK_MS = 2_000L
     }
 }

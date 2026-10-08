@@ -359,7 +359,7 @@ class LinkService : Service() {
                 m.getInt("idx"),
                 if (m.has("text")) m.getString("text") else null,
             )
-            "media_cmd" -> if (CompanionPref.MEDIA.get(this)) media.command(m.getString("cmd"))
+            "media_cmd" -> if (CompanionPref.MEDIA.get(this)) media.command(m.getString("cmd"), m.optLong("pos"))
             "battery" -> {
                 watchBattery = m.getInt("level")
                 watchCharging = m.getBoolean("charging")

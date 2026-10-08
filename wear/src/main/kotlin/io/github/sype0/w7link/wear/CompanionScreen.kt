@@ -129,7 +129,9 @@ fun WatchCompanionScreen() {
                     }
                     val media = link.media
                     item {
-                        val track = listOf(media?.optString("title").orEmpty(), media?.optString("artist").orEmpty()).filter { it.isNotEmpty() }
+                        val seconds = (media?.optLong("dur") ?: 0L) / 1000
+                        val length = if (seconds > 0) "%d:%02d".format(seconds / 60, seconds % 60) else ""
+                        val track = listOf(media?.optString("title").orEmpty(), media?.optString("artist").orEmpty(), length).filter { it.isNotEmpty() }
                         Text(
                             if (media == null || track.isEmpty()) stringResource(R.string.cmp_nothing_playing) else track.joinToString("\n"),
                             style = MaterialTheme.typography.titleSmall,

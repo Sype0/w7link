@@ -150,6 +150,10 @@ class LinkService : Service(), SensorEventListener {
         override fun onSkipToPrevious() {
             mediaCommand("prev")
         }
+
+        override fun onSeekTo(pos: Long) {
+            send(Proto.msg("media_cmd", "cmd" to "seek", "pos" to pos))
+        }
     }
 
     private val advertiseCallback = object : AdvertiseCallback() {
@@ -686,6 +690,7 @@ class LinkService : Service(), SensorEventListener {
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, now.optString("title"))
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, now.optString("artist"))
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, now.optLong("dur"))
                 .build()
         )
         val playing = now.optBoolean("playing")
@@ -693,12 +698,14 @@ class LinkService : Service(), SensorEventListener {
             PlaybackState.Builder()
                 .setActions(
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                        PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                        (if (now.optLong("dur") > 0) PlaybackState.ACTION_SEEK_TO else 0L)
                 )
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                    PlaybackState.PLAYBACK_POSITION_UNKNOWN,
-                    if (playing) 1f else 0f,
+                    // An older phone app sends no position.
+                    now.optLong("pos", PlaybackState.PLAYBACK_POSITION_UNKNOWN),
+                    if (playing) now.optDouble("speed", 1.0).toFloat() else 0f,
                 )
                 .build()
         )
