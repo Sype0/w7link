@@ -33,6 +33,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.AudioAttributes
+import android.media.MediaDescription
 import android.media.MediaMetadata
 import android.media.Ringtone
 import android.media.RingtoneManager
@@ -153,6 +154,11 @@ class LinkService : Service(), SensorEventListener {
 
         override fun onSeekTo(pos: Long) {
             send(Proto.msg("media_cmd", "cmd" to "seek", "pos" to pos))
+        }
+
+        override fun onSkipToQueueItem(id: Long) {
+            // The phone reads the number as the item's id for this command.
+            send(Proto.msg("media_cmd", "cmd" to "queue", "pos" to id))
         }
     }
 
@@ -693,14 +699,32 @@ class LinkService : Service(), SensorEventListener {
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, now.optLong("dur"))
                 .build()
         )
+        val upNext = now.optJSONArray("queue")
+        current.setQueue(
+            if (upNext == null || upNext.length() == 0) {
+                null
+            } else {
+                List(upNext.length()) { i ->
+                    val item = upNext.getJSONObject(i)
+                    val description = MediaDescription.Builder()
+                        .setMediaId(item.optString("id"))
+                        .setTitle(item.optString("title"))
+                        .setSubtitle(item.optString("sub"))
+                        .build()
+                    MediaSession.QueueItem(description, item.optLong("id"))
+                }
+            }
+        )
         val playing = now.optBoolean("playing")
         current.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(
                     PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
                         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        (if (now.optLong("dur") > 0) PlaybackState.ACTION_SEEK_TO else 0L)
+                        (if (now.optLong("dur") > 0) PlaybackState.ACTION_SEEK_TO else 0L) or
+                        (if (upNext != null && upNext.length() > 0) PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM else 0L)
                 )
+                .setActiveQueueItemId(now.optLong("queueAt", -1L))
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
                     // An older phone app sends no position.

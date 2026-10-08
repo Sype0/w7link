@@ -8,12 +8,14 @@ import android.content.Context
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.SystemClock
 import android.view.KeyEvent
 import io.github.sype0.w7link.common.Proto
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Mirrors the phone's current media session to the watch and applies its commands. */
@@ -35,6 +37,7 @@ class MediaBridge(
     private val callback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = push(false)
         override fun onPlaybackStateChanged(state: PlaybackState?) = push(false)
+        override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) = push(false)
         override fun onSessionDestroyed() = refresh()
     }
 
@@ -99,6 +102,8 @@ class MediaBridge(
             "dur" to (meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
             "pos" to position,
             "speed" to (playback?.playbackSpeed?.toDouble() ?: 1.0),
+            "queue" to upNext(controller?.queue, playback?.activeQueueItemId ?: -1L),
+            "queueAt" to (playback?.activeQueueItemId ?: -1L),
             "vol" to audio.getStreamVolume(AudioManager.STREAM_MUSIC),
             "volMax" to audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
         )
@@ -112,6 +117,22 @@ class MediaBridge(
         send(message)
     }
 
+    /** The playing item and the ones after it, as many as fit a message comfortably. */
+    private fun upNext(queue: List<MediaSession.QueueItem>?, active: Long): JSONArray {
+        val items = JSONArray()
+        if (queue == null) return items
+        val from = queue.indexOfFirst { it.queueId == active }.coerceAtLeast(0)
+        for (item in queue.subList(from, minOf(queue.size, from + MAX_QUEUE))) {
+            items.put(
+                JSONObject()
+                    .put("id", item.queueId)
+                    .put("title", item.description.title?.toString().orEmpty())
+                    .put("sub", item.description.subtitle?.toString().orEmpty())
+            )
+        }
+        return items
+    }
+
     /** True after a seek: the position is not where steady playback from the last one sent would be. */
     private fun positionJumped(position: Long): Boolean {
         if (position < 0 || lastPosition < 0) return false
@@ -122,6 +143,8 @@ class MediaBridge(
     fun command(cmd: String, position: Long = 0) {
         when (cmd) {
             "seek" -> current?.transportControls?.seekTo(position)
+            // For this one the number is a queue item's id.
+            "queue" -> current?.transportControls?.skipToQueueItem(position)
             // Media keys reach whichever app last played, even without an active session.
             "play_pause" -> key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "next" -> key(KeyEvent.KEYCODE_MEDIA_NEXT)
@@ -143,5 +166,6 @@ class MediaBridge(
 
     private companion object {
         const val SEEK_SLACK_MS = 2_000L
+        const val MAX_QUEUE = 25
     }
 }
