@@ -27,6 +27,8 @@ class MediaBridge(
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val listener = ComponentName(context, NotifListener::class.java)
+    /** Every active session, each with [callback]: the system says nothing when one of them starts playing. */
+    private var controllers: List<MediaController> = emptyList()
     private var current: MediaController? = null
     private var started = false
     private var lastSent: String? = null
@@ -35,9 +37,9 @@ class MediaBridge(
     private var lastSpeed = 0f
 
     private val callback = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) = push(false)
-        override fun onPlaybackStateChanged(state: PlaybackState?) = push(false)
-        override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) = push(false)
+        override fun onMetadataChanged(metadata: MediaMetadata?) = choose()
+        override fun onPlaybackStateChanged(state: PlaybackState?) = choose()
+        override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) = choose()
         override fun onSessionDestroyed() = refresh()
     }
 
@@ -59,19 +61,27 @@ class MediaBridge(
         handler.post {
             if (started) sessions.removeOnActiveSessionsChangedListener(this)
             started = false
-            current?.unregisterCallback(callback)
+            controllers.forEach { it.unregisterCallback(callback) }
+            controllers = emptyList()
             current = null
         }
     }
 
     override fun onActiveSessionsChanged(controllers: MutableList<MediaController>?) {
-        // The one playing, else the most recent; the system lists them by priority.
-        val next = controllers?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: controllers?.firstOrNull()
-        if (next?.sessionToken != current?.sessionToken) {
-            current?.unregisterCallback(callback)
-            current = next
-            next?.registerCallback(callback, handler)
-        }
+        // Only additions, removals and (in)activation come this way, not a session starting to
+        // play, so every session is watched; an idle one (a messenger's, say) would otherwise be
+        // kept once the player's session went and came back behind it.
+        this.controllers.forEach { it.unregisterCallback(callback) }
+        this.controllers = controllers.orEmpty()
+        this.controllers.forEach { it.registerCallback(callback, handler) }
+        choose()
+    }
+
+    /** The one playing, else the one shown so far while it lasts, else the system's first. */
+    private fun choose() {
+        current = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: controllers.firstOrNull { it.sessionToken == current?.sessionToken }
+            ?: controllers.firstOrNull()
         push(false)
     }
 
