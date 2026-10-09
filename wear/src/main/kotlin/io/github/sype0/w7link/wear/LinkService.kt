@@ -132,6 +132,10 @@ class LinkService : Service(), SensorEventListener {
 
     private var ringtone: Ringtone? = null
 
+    /** The id the link's notification is posted under; it changes when its ongoing activity goes, see [refreshStatus]. */
+    private var statusId = NOTIFICATION_LINK
+    private var statusOngoing = false
+
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
             Log.w(TAG, "advertise failed: $errorCode")
@@ -250,10 +254,11 @@ class LinkService : Service(), SensorEventListener {
 
     private fun enterForeground(): Boolean {
         val notification = statusNotification()
+        statusOngoing = playingNow() != null
         if (granted(Manifest.permission.ACTIVITY_RECOGNITION)) {
             try {
                 startForeground(
-                    NOTIFICATION_LINK, notification,
+                    statusId, notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH,
                 )
                 return true
@@ -262,7 +267,7 @@ class LinkService : Service(), SensorEventListener {
             }
         }
         return try {
-            startForeground(NOTIFICATION_LINK, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            startForeground(statusId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
             true
         } catch (e: Exception) {
             // Without the Bluetooth permissions the system refuses this service type.
@@ -742,10 +747,28 @@ class LinkService : Service(), SensorEventListener {
         main.post { uiListeners.forEach { it() } }
     }
 
-    /** Re-posts the link's notification: the state, and the phone's playback while it has one. Main thread. */
+    /**
+     * Re-posts the link's notification: the state, and the phone's playback while it has one. Main
+     * thread. The Now bar keeps an ongoing activity until the notification that carried it is gone,
+     * so re-posting it without one is not enough: the notification then moves to the other id,
+     * which takes the old one down (the service stays in the foreground throughout).
+     */
     private fun refreshStatus() {
-        notifications.notify(NOTIFICATION_LINK, statusNotification())
+        val ongoing = playingNow() != null
+        if (ongoing == statusOngoing) {
+            notifications.notify(statusId, statusNotification())
+            return
+        }
+        val before = statusId
+        statusId = if (before == NOTIFICATION_LINK) NOTIFICATION_LINK_ALT else NOTIFICATION_LINK
+        if (!enterForeground()) {
+            statusId = before
+            notifications.notify(statusId, statusNotification())
+        }
     }
+
+    /** What the phone plays right now, when the Now bar should show it. */
+    private fun playingNow(): JSONObject? = media.takeIf { state == State.CONNECTED && it?.optBoolean("playing") == true }
 
     /**
      * The permanent notification of the link. While the phone actually plays something it also
@@ -761,7 +784,7 @@ class LinkService : Service(), SensorEventListener {
             .setContentTitle(getString(statusText(state)))
             .setContentIntent(open)
             .setOngoing(true)
-        val playing = media.takeIf { state == State.CONNECTED && it?.optBoolean("playing") == true }
+        val playing = playingNow()
         if (playing != null) {
             val track = listOf(playing.optString("title"), playing.optString("artist"))
                 .filter { it.isNotEmpty() }
@@ -774,7 +797,7 @@ class LinkService : Service(), SensorEventListener {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             builder.setContentText(track).setContentIntent(openMedia)
-            OngoingActivity.Builder(this, NOTIFICATION_LINK, builder)
+            OngoingActivity.Builder(this, statusId, builder)
                 .setStaticIcon(R.drawable.ic_w7link)
                 .setTouchIntent(openMedia)
                 .setStatus(Status.forPart(Status.TextPart(track)))
@@ -797,6 +820,7 @@ class LinkService : Service(), SensorEventListener {
         private const val PREF_DISCONNECT_ALERT = "disconnectAlert"
         private const val LOST_DELAY_MS = 20_000L
         private const val NOTIFICATION_LINK = 1
+        private const val NOTIFICATION_LINK_ALT = 6
         private const val NOTIFICATION_FIND = 2
         const val NOTIFICATION_MIRROR = 3
         private const val PREF_PEER = "peer"
