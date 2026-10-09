@@ -93,7 +93,7 @@ class NetTunnelTest {
     fun aQueryStaysUnansweredWithoutAResolver() {
         DatagramSocket(0, InetAddress.getLoopbackAddress()).use { dns ->
             // Lookups go to port 53, which a test can't serve; only the refusal can be checked here.
-            phone.resolver = { null }
+            phone.resolver = { emptyList() }
             val reply = CompletableFuture<ByteArray>()
             watch.resolve(byteArrayOf(1, 2, 3)) { reply.complete(it) }
             dns.soTimeout = 300

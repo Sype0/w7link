@@ -45,4 +45,6 @@
     <string name="cmp_internet_on">Telefonun internetini kullan</string>
     <string name="cmp_internet_off">Telefon internetini kapat</string>
     <string name="cmp_internet_adb">Bu saat VPN izni soramıyor. Bir kez çalıştırın: adb shell appops set %1$s ACTIVATE_VPN allow</string>
+    <string name="cmp_internet_stats">Bağlantı %1$d / %2$d, DNS yanıtı %3$d / %4$d</string>
+    <string name="cmp_internet_error">İnternet açılamadı: %1$s</string>
 </resources>

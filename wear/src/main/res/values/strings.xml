@@ -481,4 +481,6 @@
     <string name="cmp_internet_on">Use phone\'s internet</string>
     <string name="cmp_internet_off">Stop phone internet</string>
     <string name="cmp_internet_adb">This watch can\'t ask for VPN access. Run once: adb shell appops set %1$s ACTIVATE_VPN allow</string>
+    <string name="cmp_internet_stats">Connections %1$d of %2$d, DNS answers %3$d of %4$d</string>
+    <string name="cmp_internet_error">Internet failed: %1$s</string>
 </resources>

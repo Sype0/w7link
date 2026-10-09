@@ -44,6 +44,7 @@ import androidx.wear.compose.material3.Text
 import com.heartline.wear.R
 import com.heartline.wear.ui.theme.WearColors
 import io.github.sype0.w7link.common.LinkHub
+import kotlinx.coroutines.delay
 
 /** The running link service, re-read by the caller whenever the service reports a change. */
 @Composable
@@ -89,6 +90,14 @@ fun WatchCompanionScreen() {
     }
     // Wear OS may have no screen to ask for VPN access on; then only adb can grant it.
     var vpnBlocked by remember { mutableStateOf(false) }
+    // The internet tallies move on their own; while it runs, the line below the button follows them.
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(NetService.running) {
+        while (NetService.running) {
+            delay(2_000)
+            tick++
+        }
+    }
     val list = rememberTransformingLazyColumnState()
     ScreenScaffold(scrollState = list) { padding ->
         TransformingLazyColumn(state = list, contentPadding = padding) {
@@ -145,6 +154,20 @@ fun WatchCompanionScreen() {
                     }
                     if (vpnBlocked) {
                         item { Note(stringResource(R.string.cmp_internet_adb, context.packageName)) }
+                    }
+                    if (NetService.running) {
+                        item {
+                            val net = remember(tick) { LinkHub.net }
+                            Note(
+                                stringResource(
+                                    R.string.cmp_internet_stats,
+                                    net.connectionsOpened.get(), net.connectionsAsked.get(),
+                                    net.lookupsAnswered.get(), net.lookupsAsked.get(),
+                                ),
+                            )
+                        }
+                    } else {
+                        NetService.error?.let { item { Note(stringResource(R.string.cmp_internet_error, it)) } }
                     }
                     item { Note(stringResource(R.string.cmp_steps_today, link.stepsToday)) }
                     item { Action(Icons.Rounded.LinkOff, stringResource(R.string.cmp_unpair)) { link.unpair() } }

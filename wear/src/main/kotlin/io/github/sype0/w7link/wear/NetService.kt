@@ -12,6 +12,7 @@ import android.util.Log
 import com.heartline.wear.R
 import io.github.sype0.w7link.common.LinkHub
 import io.github.sype0.w7link.common.LocalProxy
+import io.github.sype0.w7link.common.NetTunnel
 import io.github.sype0.w7link.common.TunNat
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -47,19 +48,22 @@ class NetService : VpnService() {
                 .setSession(getString(R.string.cmp_internet_on))
                 .addAddress(ADDRESS, 32)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer(DNS)
+                .addDnsServer(NetTunnel.RESOLVER_ADDRESS)
                 .setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", local.port))
                 .setBlocking(true)
                 .establish()
         } catch (e: Exception) {
             Log.w(TAG, "vpn", e)
+            error = e.toString()
             null
         }
         if (established == null) {
+            if (error == null) error = "VPN not allowed"
             local.close()
             stopSelf()
             return
         }
+        error = null
         proxy = local
         tun = established
         val address = InetAddress.getByName(ADDRESS)
@@ -67,6 +71,7 @@ class NetService : VpnService() {
             ServerSocket(0, 50, address)
         } catch (e: Exception) {
             Log.w(TAG, "relay", e)
+            error = e.toString()
             stop()
             return
         }
@@ -131,9 +136,6 @@ class NetService : VpnService() {
         private const val TAG = "W7Link"
         private const val ACTION_STOP = "io.github.sype0.w7link.wear.NET_STOP"
         private const val ADDRESS = "10.111.0.2"
-
-        // Nothing lives at this address; queries sent to it are answered by the phone's resolver.
-        private const val DNS = "10.111.0.1"
         private const val PREF_WANTED = "internet"
 
         /** On unless the user turned it off on the watch. */
@@ -158,6 +160,11 @@ class NetService : VpnService() {
 
         @Volatile
         var running = false
+            private set
+
+        /** Why the last start failed, until one succeeds. */
+        @Volatile
+        var error: String? = null
             private set
 
         fun start(context: Context) {

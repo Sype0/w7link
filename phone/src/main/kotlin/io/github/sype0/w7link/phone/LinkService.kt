@@ -48,6 +48,7 @@ import io.github.sype0.w7link.common.Proto
 import io.github.sype0.w7link.common.SecureChannel
 import org.json.JSONObject
 import java.io.IOException
+import java.net.InetAddress
 import java.security.KeyPair
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
@@ -166,9 +167,14 @@ class LinkService : Service() {
         media = MediaBridge(this, main) { send(it) }
         // The watch's connections go out from here, but never back into this phone itself.
         LinkHub.net.exit = { CompanionPref.INTERNET.get(this) && !it.isLoopbackAddress && !it.isAnyLocalAddress }
+        // The network's own servers first; the public ones only answer when none of them does.
         LinkHub.net.resolver = {
-            val network = getSystemService(ConnectivityManager::class.java)
-            network.getLinkProperties(network.activeNetwork)?.dnsServers?.firstOrNull().takeIf { CompanionPref.INTERNET.get(this) }
+            if (!CompanionPref.INTERNET.get(this)) {
+                emptyList()
+            } else {
+                val network = getSystemService(ConnectivityManager::class.java)
+                network.getLinkProperties(network.activeNetwork)?.dnsServers.orEmpty() + PUBLIC_DNS.map(InetAddress::getByName)
+            }
         }
         instance = this
     }
@@ -544,6 +550,7 @@ class LinkService : Service() {
 
     companion object {
         private const val TAG = "W7Link"
+        private val PUBLIC_DNS = listOf("1.1.1.1", "8.8.8.8")
         private const val CHANNEL_LINK = "link"
         private const val CHANNEL_FIND = "find"
         private const val CHANNEL_ALERTS = "alerts"
