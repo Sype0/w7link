@@ -239,7 +239,7 @@ class SysProxy(private val context: Context, private val adapter: BluetoothAdapt
         val caps = connectivity.getNetworkCapabilities(network) ?: return emptyList()
         if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return emptyList()
         var transports = 0L
-        caps.transportTypes.forEach { transports = transports or (1L shl it) }
+        for (transport in 0 until 16) if (caps.hasTransport(transport)) transports = transports or (1L shl transport)
         var capabilities = 0L
         caps.capabilities.forEach { capabilities = capabilities or (1L shl it) }
         return listOf(ProxyLink.LinkInfo(network.toString().toIntOrNull() ?: 1, transports, capabilities))
