@@ -32,7 +32,12 @@ Heartline'dan farkları:
 - Gelen aramayı saatte gösterir; yanıtla / reddet / sessize al
 - Medya kontrolü (önceki, oynat-duraklat, sonraki, ses)
 - Saate telefondan APK kurma (Uygulamalar sekmesi)
-- Saate telefon üzerinden internet (TCP ve DNS; saatte bir VPN olarak, telefon bağlanınca kendiliğinden açılır)
+- Saate telefon üzerinden internet, Galaxy Wearable'ın yaptığı gibi: Wear OS'un kendi Bluetooth
+  paylaşımı (sysproxy v2). Telefon bir L2CAP kanalı açar, numarasını saatin sistemindeki GATT
+  özelliğine yazar; saat oraya bağlanır ve bütün saat, iki tarafta da VPN olmadan, telefonun
+  internetine çıkar. Saat bunu yalnızca kurulduğu (bağlı/eşleşmiş) telefondan kabul eder ve saatin
+  sisteminde v2 açık olmalıdır; telefondaki **Saat eşlikçisi** ekranı durumu gösterir. Yedek olarak
+  saatteki VPN yolu (TCP ve DNS) durur; saatin Telefon sayfasından açılır.
 - Telefonumu bul, saatimi bul, karşılıklı pil durumu, günlük adım
 
 Bunlar uygulamanın içindedir: telefonda **Ayarlar → Saat eşlikçisi**; saatte ana ekran yana

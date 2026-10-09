@@ -967,6 +967,13 @@
     <string name="cmp_opt_media_sub">Control playback and volume from the watch</string>
     <string name="cmp_opt_internet">Internet for the watch</string>
     <string name="cmp_opt_internet_sub">Let the watch go online through this phone</string>
+    <string name="cmp_proxy_title">Watch\'s connection</string>
+    <string name="cmp_proxy_waiting">Waiting for the watch to connect</string>
+    <string name="cmp_proxy_offered">Offered to the watch, waiting for it to connect. The watch takes it only from the phone it was set up with.</string>
+    <string name="cmp_proxy_no_service">This watch\'s system doesn\'t offer tethering over Bluetooth to this app</string>
+    <string name="cmp_proxy_connected">The watch is online through this phone (%1$d connections)</string>
+    <string name="cmp_proxy_old">The watch asked for the older proxy, which this app can\'t speak</string>
+    <string name="cmp_proxy_failed">Not working: %1$s</string>
     <string name="cmp_ring_watch">Ring the watch</string>
     <string name="cmp_stop_ring">Stop ringing</string>
     <string name="cmp_opt_low_battery">Watch battery low</string>

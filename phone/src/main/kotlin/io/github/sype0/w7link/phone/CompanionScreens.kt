@@ -249,7 +249,25 @@ fun CompanionScreen(onBack: (() -> Unit)? = null, onApps: () -> Unit = {}, listS
                 PrefRow(CompanionPref.MEDIA, Icons.Rounded.MusicNote, R.string.cmp_opt_media, R.string.cmp_opt_media_sub) {
                     LinkService.instance?.media?.push(true)
                 }
-                PrefRow(CompanionPref.INTERNET, Icons.Rounded.Public, R.string.cmp_opt_internet, R.string.cmp_opt_internet_sub)
+                PrefRow(CompanionPref.INTERNET, Icons.Rounded.Public, R.string.cmp_opt_internet, R.string.cmp_opt_internet_sub) {
+                    LinkService.instance?.sysProxy?.refreshNetwork()
+                }
+                link?.sysProxy?.let { proxy ->
+                    CardRow(
+                        stringResource(R.string.cmp_proxy_title),
+                        subtitle = when (proxy.status) {
+                            SysProxy.Status.WAITING -> stringResource(R.string.cmp_proxy_waiting)
+                            SysProxy.Status.OFFERING, SysProxy.Status.OFFERED -> stringResource(R.string.cmp_proxy_offered)
+                            SysProxy.Status.NO_SERVICE -> stringResource(R.string.cmp_proxy_no_service)
+                            SysProxy.Status.CONNECTED -> stringResource(R.string.cmp_proxy_connected, proxy.flows)
+                            SysProxy.Status.OLD_PROXY -> stringResource(R.string.cmp_proxy_old)
+                            SysProxy.Status.FAILED -> stringResource(R.string.cmp_proxy_failed, proxy.detail)
+                        },
+                        showDivider = true,
+                        dividerStart = 20.dp,
+                        subtitleMaxLines = 4,
+                    )
+                }
                 PrefRow(CompanionPref.LOW_BATTERY_ALERT, Icons.Rounded.BatteryAlert, R.string.cmp_opt_low_battery, R.string.cmp_opt_low_battery_sub)
                 PrefRow(CompanionPref.DISCONNECT_ALERT, Icons.Rounded.Vibration, R.string.cmp_opt_disconnect, R.string.cmp_opt_disconnect_sub, divider = false) {
                     LinkService.instance?.sendPrefs()

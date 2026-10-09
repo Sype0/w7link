@@ -138,7 +138,7 @@ class NetService : VpnService() {
         private const val ADDRESS = "10.111.0.2"
         private const val PREF_WANTED = "internet"
 
-        /** On unless the user turned it off on the watch. */
+        /** Off unless the user turned it on on the watch: the phone's own proxy is the usual way now. */
         fun setWanted(context: Context, on: Boolean) =
             context.getSharedPreferences("link", Context.MODE_PRIVATE).edit().putBoolean(PREF_WANTED, on).apply()
 
@@ -150,7 +150,7 @@ class NetService : VpnService() {
             try {
                 if (!connected) {
                     if (running) stop(context)
-                } else if (context.getSharedPreferences("link", Context.MODE_PRIVATE).getBoolean(PREF_WANTED, true) && VpnService.prepare(context) == null) {
+                } else if (context.getSharedPreferences("link", Context.MODE_PRIVATE).getBoolean(PREF_WANTED, false) && VpnService.prepare(context) == null) {
                     start(context)
                 }
             } catch (e: Exception) {

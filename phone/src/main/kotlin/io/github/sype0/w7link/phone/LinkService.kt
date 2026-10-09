@@ -198,14 +198,19 @@ class LinkService : Service() {
             media.start()
         }
         startScan()
-        if (sysProxy == null && CompanionPref.INTERNET.get(this)) {
-            getSystemService(BluetoothManager::class.java).adapter?.takeIf { it.isEnabled }?.let { sysProxy = SysProxy(it).apply { start() } }
+        if (sysProxy == null) {
+            getSystemService(BluetoothManager::class.java).adapter?.takeIf { it.isEnabled }?.let {
+                sysProxy = SysProxy(this, it) { notifyUi() }.apply { start() }
+            }
         }
         return START_STICKY
     }
 
     private var registered = false
-    private var sysProxy: SysProxy? = null
+
+    /** The watch's internet through this phone; the Companion screen shows how it is doing. */
+    var sysProxy: SysProxy? = null
+        private set
 
     override fun onDestroy() {
         instance = null
@@ -285,6 +290,7 @@ class LinkService : Service() {
                 attachHub(link)
                 setState(State.CONNECTED)
                 onConnected()
+                sysProxy?.onWatch(device)
             }
             while (true) {
                 val (kind, body) = link.receiveFrame()
@@ -303,6 +309,7 @@ class LinkService : Service() {
             Log.i(TAG, "link closed: $e")
         } finally {
             LinkHub.detach()
+            sysProxy?.onWatch(null)
             channel = null
             pairCode = null
             try {
