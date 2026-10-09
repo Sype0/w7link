@@ -257,7 +257,8 @@ fun CompanionScreen(onBack: (() -> Unit)? = null, onApps: () -> Unit = {}, listS
                         stringResource(R.string.cmp_proxy_title),
                         subtitle = when (proxy.status) {
                             SysProxy.Status.WAITING -> stringResource(R.string.cmp_proxy_waiting)
-                            SysProxy.Status.OFFERING, SysProxy.Status.OFFERED -> stringResource(R.string.cmp_proxy_offered)
+                            SysProxy.Status.OFFERING -> stringResource(R.string.cmp_proxy_offering)
+                            SysProxy.Status.OFFERED -> stringResource(R.string.cmp_proxy_offered)
                             SysProxy.Status.NO_SERVICE -> stringResource(R.string.cmp_proxy_no_service)
                             SysProxy.Status.CONNECTED -> stringResource(R.string.cmp_proxy_connected, proxy.flows)
                             SysProxy.Status.OLD_PROXY -> stringResource(R.string.cmp_proxy_old)

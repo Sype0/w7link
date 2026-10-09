@@ -969,6 +969,7 @@
     <string name="cmp_opt_internet_sub">Let the watch go online through this phone</string>
     <string name="cmp_proxy_title">Watch\'s connection</string>
     <string name="cmp_proxy_waiting">Waiting for the watch to connect</string>
+    <string name="cmp_proxy_offering">Looking for the watch\'s tethering service…</string>
     <string name="cmp_proxy_offered">Offered to the watch, waiting for it to connect. The watch takes it only from the phone it was set up with.</string>
     <string name="cmp_proxy_no_service">This watch\'s system doesn\'t offer tethering over Bluetooth to this app</string>
     <string name="cmp_proxy_connected">The watch is online through this phone (%1$d connections)</string>

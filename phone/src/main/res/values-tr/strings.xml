@@ -45,6 +45,7 @@
     <string name="cmp_opt_internet_sub">Saat bu telefon üzerinden internete çıksın</string>
     <string name="cmp_proxy_title">Saatin bağlantısı</string>
     <string name="cmp_proxy_waiting">Saatin bağlanması bekleniyor</string>
+    <string name="cmp_proxy_offering">Saatin paylaşım servisi aranıyor…</string>
     <string name="cmp_proxy_offered">Saate önerildi, bağlanması bekleniyor. Saat bunu yalnızca kurulduğu telefondan kabul eder.</string>
     <string name="cmp_proxy_no_service">Bu saatin sistemi Bluetooth üzerinden interneti bu uygulamaya açmıyor</string>
     <string name="cmp_proxy_connected">Saat bu telefon üzerinden internette (%1$d bağlantı)</string>
